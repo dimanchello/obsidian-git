@@ -67,10 +67,10 @@ Supported desktop platforms: Linux, Windows, and macOS.
    - `manifest.json`
    - `styles.css`
 2. Open your Obsidian vault folder and navigate to `.obsidian/plugins/`.
-3. Create a new directory named `obsidian-git-commands`.
+3. Create a new directory named `git-commands`.
 4. Place `main.js`, `manifest.json`, and `styles.css` into that directory:
    ```
-   <vault>/.obsidian/plugins/obsidian-git-commands/
+   <vault>/.obsidian/plugins/git-commands/
    ├── main.js
    ├── manifest.json
    └── styles.css
