@@ -1,7 +1,17 @@
-import { PluginSettingTab, Setting } from 'obsidian';
+import { PluginSettingTab, Setting, type SettingDefinitionItem } from 'obsidian';
 import type GitCommandsPlugin from './main';
-import { DEFAULT_SETTINGS, SETTING_VALIDATION } from './settings';
+import {
+  DEFAULT_SETTINGS,
+  SETTING_PROPERTY_KEYS,
+  SETTING_VALIDATION,
+  type GitPluginSettings,
+} from './settings';
 import { PLUGIN_FORMAT } from './plugin-constants';
+
+const SETTING_CONTROL_TYPES = {
+  text: 'text',
+  number: 'number',
+} as const;
 
 export class GitSettingsTab extends PluginSettingTab {
   private readonly gitPlugin: GitCommandsPlugin;
@@ -9,6 +19,94 @@ export class GitSettingsTab extends PluginSettingTab {
   public constructor(plugin: GitCommandsPlugin) {
     super(plugin.app, plugin);
     this.gitPlugin = plugin;
+  }
+
+  public override getSettingDefinitions(): SettingDefinitionItem[] {
+    const { messages } = this.gitPlugin;
+    return [
+      {
+        name: messages.settings.executableName,
+        desc: messages.settings.executableDescription,
+        control: {
+          type: SETTING_CONTROL_TYPES.text,
+          key: SETTING_PROPERTY_KEYS.gitExecutable,
+          placeholder: DEFAULT_SETTINGS.gitExecutable,
+        },
+      },
+      {
+        name: messages.settings.fetchIntervalName,
+        desc: messages.settings.fetchIntervalDescription,
+        control: {
+          type: SETTING_CONTROL_TYPES.number,
+          key: SETTING_PROPERTY_KEYS.autoFetchIntervalSeconds,
+          placeholder: String(DEFAULT_SETTINGS.autoFetchIntervalSeconds),
+          min: SETTING_VALIDATION.minimumFetchIntervalSeconds,
+        },
+      },
+      {
+        name: messages.settings.syncIntervalName,
+        desc: messages.settings.syncIntervalDescription,
+        control: {
+          type: SETTING_CONTROL_TYPES.number,
+          key: SETTING_PROPERTY_KEYS.autoSyncIntervalMinutes,
+          placeholder: String(DEFAULT_SETTINGS.autoSyncIntervalMinutes),
+          min: SETTING_VALIDATION.minimumSyncIntervalMinutes,
+        },
+      },
+      {
+        name: messages.settings.commitTemplateName,
+        desc: messages.settings.commitTemplateDescription,
+        control: {
+          type: SETTING_CONTROL_TYPES.text,
+          key: SETTING_PROPERTY_KEYS.commitMessageTemplate,
+          placeholder: messages.defaultCommitMessageTemplate,
+        },
+      },
+    ];
+  }
+
+  public override getControlValue(key: string): unknown {
+    return this.gitPlugin.settings[key as keyof GitPluginSettings];
+  }
+
+  public override async setControlValue(key: string, value: unknown): Promise<void> {
+    switch (key) {
+      case SETTING_PROPERTY_KEYS.gitExecutable: {
+        const text = typeof value === 'string' ? value.trim() : DEFAULT_SETTINGS.gitExecutable;
+        await this.gitPlugin.updateGitExecutable(text || DEFAULT_SETTINGS.gitExecutable);
+        break;
+      }
+      case SETTING_PROPERTY_KEYS.autoFetchIntervalSeconds: {
+        const seconds = Number(value);
+        if (
+          Number.isFinite(seconds) &&
+          seconds >= SETTING_VALIDATION.minimumFetchIntervalSeconds
+        ) {
+          this.gitPlugin.settings.autoFetchIntervalSeconds = Math.floor(seconds);
+          await this.gitPlugin.saveSettings();
+          this.gitPlugin.restartAutoFetch();
+        }
+        break;
+      }
+      case SETTING_PROPERTY_KEYS.autoSyncIntervalMinutes: {
+        const minutes = Number(value);
+        if (
+          Number.isFinite(minutes) &&
+          minutes >= SETTING_VALIDATION.minimumSyncIntervalMinutes
+        ) {
+          this.gitPlugin.settings.autoSyncIntervalMinutes = Math.floor(minutes);
+          await this.gitPlugin.saveSettings();
+          this.gitPlugin.restartAutoSync();
+        }
+        break;
+      }
+      case SETTING_PROPERTY_KEYS.commitMessageTemplate: {
+        this.gitPlugin.settings.commitMessageTemplate =
+          typeof value === 'string' ? value : PLUGIN_FORMAT.emptyString;
+        await this.gitPlugin.saveSettings();
+        break;
+      }
+    }
   }
 
   public display(): void {

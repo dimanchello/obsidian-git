@@ -11,6 +11,13 @@ export const SETTING_VALIDATION = {
   minimumSyncIntervalMinutes: 0,
 } as const;
 
+export const SETTING_PROPERTY_KEYS = {
+  gitExecutable: 'gitExecutable',
+  autoFetchIntervalSeconds: 'autoFetchIntervalSeconds',
+  autoSyncIntervalMinutes: 'autoSyncIntervalMinutes',
+  commitMessageTemplate: 'commitMessageTemplate',
+} as const;
+
 const JAVASCRIPT_TYPE_NAMES = {
   object: 'object',
 } as const;

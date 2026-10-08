@@ -43,6 +43,30 @@ Supported desktop platforms: Linux, Windows, and macOS.
 
 ---
 
+## Screenshots
+
+### Repository Status Modal
+Review changed files, staged and unstaged state, and perform one-click commit or sync operations.
+
+![Git Repository Status](docs/images/status-modal.png)
+
+### Status Bar & Quick Actions Menu
+View branch and modified file indicators directly in the Obsidian status bar, and click to access the quick actions popup.
+
+![Status Bar Menu](docs/images/status-bar-menu.png)
+
+### Command Palette
+Trigger all operations quickly via the standard Obsidian Command Palette.
+
+![Command Palette](docs/images/command-palette.png)
+
+### Plugin Settings
+Configure custom Git executable paths, auto-fetch and auto-sync intervals, and commit message templates.
+
+![Plugin Settings](docs/images/settings.png)
+
+---
+
 ## Prerequisites
 
 1. **Obsidian Desktop** v1.8.7 or newer.

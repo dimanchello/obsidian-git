@@ -1,4 +1,4 @@
-import { ChangeKind, type GitFileChange } from '../src/git/status-parser';
+import { ChangeKind, FileStatusCode, type GitFileChange } from '../src/git/status-parser';
 import { ENGLISH_MESSAGES } from '../src/i18n/en';
 
 export const STATUS_MODAL_TEST_CONSTANTS = {
@@ -19,29 +19,29 @@ export const STATUS_MODAL_TEST_CONSTANTS = {
 export const STATUS_MODAL_TEST_FILES: readonly GitFileChange[] = [
   {
     kind: ChangeKind.Conflict,
-    indexStatus: 'U',
-    worktreeStatus: 'U',
+    indexStatus: FileStatusCode.Unmerged,
+    worktreeStatus: FileStatusCode.Unmerged,
     path: 'conflict.txt',
     staged: false,
   },
   {
     kind: ChangeKind.Modified,
-    indexStatus: 'M',
-    worktreeStatus: '.',
+    indexStatus: FileStatusCode.Modified,
+    worktreeStatus: FileStatusCode.Unchanged,
     path: 'staged.md',
     staged: true,
   },
   {
     kind: ChangeKind.Modified,
-    indexStatus: '.',
-    worktreeStatus: 'M',
+    indexStatus: FileStatusCode.Unchanged,
+    worktreeStatus: FileStatusCode.Modified,
     path: 'unstaged.md',
     staged: false,
   },
   {
     kind: ChangeKind.Untracked,
-    indexStatus: '?',
-    worktreeStatus: '?',
+    indexStatus: FileStatusCode.Untracked,
+    worktreeStatus: FileStatusCode.Untracked,
     path: 'new.txt',
     staged: false,
   },
@@ -50,8 +50,8 @@ export const STATUS_MODAL_TEST_FILES: readonly GitFileChange[] = [
 export const STATUS_MODAL_TEST_STAGED_ONLY: readonly GitFileChange[] = [
   {
     kind: ChangeKind.Added,
-    indexStatus: 'A',
-    worktreeStatus: '.',
+    indexStatus: FileStatusCode.Added,
+    worktreeStatus: FileStatusCode.Unchanged,
     path: 'added.md',
     staged: true,
   },

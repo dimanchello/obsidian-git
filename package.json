@@ -1,7 +1,7 @@
 {
   "name": "obsidian-git",
   "version": "1.0.0",
-  "description": "Run Git commands for an Obsidian vault",
+  "description": "Run Git commands for a vault",
   "author": "dimanchello",
   "license": "MIT",
   "repository": {

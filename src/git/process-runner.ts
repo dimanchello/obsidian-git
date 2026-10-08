@@ -87,6 +87,7 @@ export class NodeProcessRunner implements ProcessRunner {
         maxBuffer: MAX_OUTPUT_BYTES,
         timeout: request.timeoutMs ?? PROCESS_TIMEOUT_MS,
         windowsHide: true,
+        shell: false,
         ...(request.signal === undefined ? {} : { signal: request.signal }),
       };
 

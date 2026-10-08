@@ -167,7 +167,7 @@ export class GitExecutableLocator {
 
   private getExecutableNames(
     executable: string,
-    pathApi: typeof path.win32 | typeof path.posix,
+    pathApi: path.PlatformPath,
   ): readonly string[] {
     if (
       this.platform !== NODE_PLATFORMS.windows ||
@@ -180,7 +180,7 @@ export class GitExecutableLocator {
 
   private isPathLike(
     executable: string,
-    pathApi: typeof path.win32 | typeof path.posix,
+    pathApi: path.PlatformPath,
   ): boolean {
     return (
       pathApi.isAbsolute(executable) ||
@@ -191,7 +191,7 @@ export class GitExecutableLocator {
 
   private isDefaultGitCommand(
     executable: string,
-    pathApi: typeof path.win32 | typeof path.posix,
+    pathApi: path.PlatformPath,
   ): boolean {
     const basename = pathApi.basename(executable);
     const normalizedName =
@@ -204,7 +204,7 @@ export class GitExecutableLocator {
   }
 
   private getKnownInstallationPaths(
-    pathApi: typeof path.win32 | typeof path.posix,
+    pathApi: path.PlatformPath,
   ): readonly string[] {
     if (this.platform === NODE_PLATFORMS.windows) {
       return this.getWindowsInstallationPaths(path.win32);

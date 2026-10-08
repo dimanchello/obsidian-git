@@ -15,7 +15,7 @@ enum StatusRecordType {
   Untracked = '?',
 }
 
-enum FileStatusCode {
+export enum FileStatusCode {
   Unchanged = '.',
   Untracked = '?',
   Unmerged = 'U',
@@ -24,6 +24,7 @@ enum FileStatusCode {
   Renamed = 'R',
   Modified = 'M',
   TypeChanged = 'T',
+  Other = '!',
 }
 
 const STATUS_FORMAT = {
@@ -52,15 +53,15 @@ export const STATUS_COUNT_DEFAULTS = {
 
 const EMPTY_STRING = '';
 
-const MODIFIED_STATUS_CODES = new Set<string>([
+const MODIFIED_STATUS_CODES = new Set<FileStatusCode>([
   FileStatusCode.Modified,
   FileStatusCode.TypeChanged,
 ]);
 
 export interface GitFileChange {
   readonly kind: ChangeKind;
-  readonly indexStatus: string;
-  readonly worktreeStatus: string;
+  readonly indexStatus: FileStatusCode;
+  readonly worktreeStatus: FileStatusCode;
   readonly path: string;
   readonly staged: boolean;
 }
@@ -99,7 +100,7 @@ export function parseGitStatus(output: string): GitStatus {
 }
 
 function parseFileLine(line: string): GitFileChange | null {
-  const recordType = line[STATUS_FIELD_INDEX.recordType];
+  const recordType = toStatusRecordType(line[STATUS_FIELD_INDEX.recordType]);
   if (recordType === StatusRecordType.Untracked && line.startsWith(STATUS_FORMAT.untrackedPrefix)) {
     return {
       kind: ChangeKind.Untracked,
@@ -126,8 +127,8 @@ function parseFileLine(line: string): GitFileChange | null {
   const path = fields.slice(pathStart).join(STATUS_FORMAT.fieldSeparator);
   if (path.length === EMPTY_STRING.length) return null;
 
-  const indexStatus = status[STATUS_FIELD_INDEX.firstCharacter] ?? FileStatusCode.Unchanged;
-  const worktreeStatus = status[STATUS_FIELD_INDEX.secondCharacter] ?? FileStatusCode.Unchanged;
+  const indexStatus = toFileStatusCode(status[STATUS_FIELD_INDEX.firstCharacter]);
+  const worktreeStatus = toFileStatusCode(status[STATUS_FIELD_INDEX.secondCharacter]);
 
   return {
     kind: classifyChange(recordType, indexStatus, worktreeStatus),
@@ -151,10 +152,48 @@ function getPathStart(recordType: StatusRecordType): number {
   }
 }
 
+function toStatusRecordType(char: string | undefined): StatusRecordType | null {
+  switch (char) {
+    case StatusRecordType.Ordinary:
+      return StatusRecordType.Ordinary;
+    case StatusRecordType.Renamed:
+      return StatusRecordType.Renamed;
+    case StatusRecordType.Unmerged:
+      return StatusRecordType.Unmerged;
+    case StatusRecordType.Untracked:
+      return StatusRecordType.Untracked;
+    default:
+      return null;
+  }
+}
+
+function toFileStatusCode(char: string | undefined): FileStatusCode {
+  switch (char) {
+    case FileStatusCode.Untracked:
+      return FileStatusCode.Untracked;
+    case FileStatusCode.Unmerged:
+      return FileStatusCode.Unmerged;
+    case FileStatusCode.Added:
+      return FileStatusCode.Added;
+    case FileStatusCode.Deleted:
+      return FileStatusCode.Deleted;
+    case FileStatusCode.Renamed:
+      return FileStatusCode.Renamed;
+    case FileStatusCode.Modified:
+      return FileStatusCode.Modified;
+    case FileStatusCode.TypeChanged:
+      return FileStatusCode.TypeChanged;
+    case FileStatusCode.Unchanged:
+      return FileStatusCode.Unchanged;
+    default:
+      return FileStatusCode.Other;
+  }
+}
+
 function classifyChange(
   recordType: StatusRecordType,
-  indexStatus: string,
-  worktreeStatus: string,
+  indexStatus: FileStatusCode,
+  worktreeStatus: FileStatusCode,
 ): ChangeKind {
   if (
     recordType === StatusRecordType.Unmerged ||

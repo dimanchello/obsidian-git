@@ -3,7 +3,7 @@
   "name": "Git Commands",
   "version": "1.0.0",
   "minAppVersion": "1.8.7",
-  "description": "Run Git commands for the current Obsidian vault.",
+  "description": "Run Git commands for the current vault.",
   "author": "dimanchello",
   "authorUrl": "https://github.com/dimanchello",
   "isDesktopOnly": true
