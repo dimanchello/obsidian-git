@@ -1,0 +1,50 @@
+const INITIAL_BRANCH = 'main';
+
+export const GIT_INTEGRATION_TEST_VALUES = {
+  expectedSuccessExitCode: 0,
+  initialBranch: INITIAL_BRANCH,
+  expectedBranchHeader: '# branch.head ' + INITIAL_BRANCH,
+  expectedLocalAhead: '# branch.ab +1 -0',
+  expectedRemoteBehind: '# branch.ab +0 -1',
+  localFileName: 'welcome.md',
+  remoteFileName: 'remote.md',
+  initialFileContent: 'Initial note\n',
+  localFileContent: 'Local update\n',
+  remoteFileContent: 'Remote update\n',
+  initialCommitMessage: 'Initial commit',
+  remoteCommitMessage: 'Remote update',
+  localCommitMessage: 'Vault backup: test',
+  gitTestUserName: 'Obsidian Git Test',
+  gitTestUserEmail: 'obsidian-git-test@example.invalid',
+  tempDirectoryPrefix: 'obsidian-git-test-',
+  utf8Encoding: 'utf8',
+  remoteDirectoryName: 'remote.git',
+  primaryDirectoryName: 'primary',
+  secondaryDirectoryName: 'secondary',
+} as const;
+
+export const GIT_INTEGRATION_TEST_COMMANDS = {
+  initBare: (path: string): readonly string[] => [
+    'init',
+    '--bare',
+    '--initial-branch=' + GIT_INTEGRATION_TEST_VALUES.initialBranch,
+    path,
+  ],
+  initPrimary: ['init', '--initial-branch=' + GIT_INTEGRATION_TEST_VALUES.initialBranch],
+  addAll: ['add', '--all'],
+  commitInitial: ['commit', '--message', GIT_INTEGRATION_TEST_VALUES.initialCommitMessage],
+  addRemote: (path: string): readonly string[] => ['remote', 'add', 'origin', path],
+  pushUpstream: ['push', '--set-upstream', 'origin', GIT_INTEGRATION_TEST_VALUES.initialBranch],
+  clone: (remote: string, destination: string): readonly string[] => [
+    'clone',
+    remote,
+    destination,
+  ],
+  fetch: ['fetch'],
+  pull: ['pull', '--no-rebase'],
+  push: ['push'],
+  commitRemote: ['commit', '--message', GIT_INTEGRATION_TEST_VALUES.remoteCommitMessage],
+  configName: ['config', 'user.name', GIT_INTEGRATION_TEST_VALUES.gitTestUserName],
+  configAutocrlf: ['config', 'core.autocrlf', 'false'],
+  configEmail: ['config', 'user.email', GIT_INTEGRATION_TEST_VALUES.gitTestUserEmail],
+} as const;

@@ -1,0 +1,13 @@
+# Generated dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Obsidian user vault data
+.obsidian/
+
+# Repository internals and local runtime noise
+.git/
+*.log
+.DS_Store
+Thumbs.db

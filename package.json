@@ -1,0 +1,46 @@
+{
+  "name": "obsidian-git",
+  "version": "0.1.0",
+  "description": "Run Git commands for an Obsidian vault",
+  "author": "dimanchello",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dimanchello/obsidian-git.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dimanchello/obsidian-git/issues"
+  },
+  "homepage": "https://github.com/dimanchello/obsidian-git#readme",
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "git",
+    "git-commands"
+  ],
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "version": "node version-bump.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run test",
+    "test:unit": "vitest run tests/git-cli.test.ts tests/process-runner.test.ts tests/status-parser.test.ts tests/settings.test.ts tests/git-service.test.ts tests/i18n.test.ts tests/git-executable-locator.test.ts tests/status-modal.test.ts",
+    "test:integration": "vitest run tests/git-cli.integration.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.17",
+    "esbuild": "^0.25.5",
+    "obsidian": "^1.13.0",
+    "typescript": "^6.0.0",
+    "vitest": "^4.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true
+  }
+}
