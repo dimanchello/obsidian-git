@@ -33,11 +33,18 @@ export type CommitOutcome =
   | { readonly kind: CommitOutcomeKind.Committed; readonly command: GitCommand }
   | { readonly kind: CommitOutcomeKind.NoChanges; readonly command: GitCommand };
 
+export function isGitCommandAborted(error: unknown): boolean {
+  return (
+    error instanceof GitCommandError &&
+    error.command.result.termination === ProcessTermination.Aborted
+  );
+}
+
 export class GitService {
   public constructor(private readonly git: GitCli) {}
 
-  public async status(): Promise<{ readonly status: GitStatus; readonly command: GitCommand }> {
-    const command = await this.git.status();
+  public async status(signal?: AbortSignal): Promise<{ readonly status: GitStatus; readonly command: GitCommand }> {
+    const command = await this.git.status(signal);
     this.ensureSuccess(command);
     return { status: parseGitStatus(command.result.stdout), command };
   }

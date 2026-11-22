@@ -13,6 +13,7 @@ export const GIT_CLI_TEST_VALUES = {
   noRepositoryMessage: 'fatal: not a git repository',
   successfulCommitOutput: '[main abc123] backup',
   missingProcessResult: 'No process result configured for this test.',
+  abortedMessage: 'The operation was aborted',
 } as const;
 
 export const GIT_CLI_EXPECTED_ARGUMENTS = {
@@ -51,5 +52,12 @@ export const GIT_CLI_PROCESS_RESULTS = {
     stderr: GIT_CLI_TEST_VALUES.noRepositoryMessage,
     termination: ProcessTermination.Exited,
     errorMessage: GIT_CLI_TEST_VALUES.failedCommandMessage,
+  },
+  aborted: {
+    exitCode: null,
+    stdout: GIT_CLI_TEST_VALUES.emptyString,
+    stderr: GIT_CLI_TEST_VALUES.emptyString,
+    termination: ProcessTermination.Aborted,
+    errorMessage: GIT_CLI_TEST_VALUES.abortedMessage,
   },
 } as const satisfies Record<string, ProcessResult>;

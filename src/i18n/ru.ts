@@ -11,6 +11,7 @@ export const RUSSIAN_MESSAGES: PluginMessages = {
       [GitAction.CommitAll]: 'Создать commit из всех изменений хранилища',
       [GitAction.Push]: 'Создать commit и отправить (push)',
       [GitAction.Sync]: 'Синхронизация (commit → pull → push)',
+      [GitAction.Abort]: 'Отменить текущую операцию',
     },
     progress: {
       [GitAction.Status]: 'Загрузка статуса',
@@ -19,6 +20,7 @@ export const RUSSIAN_MESSAGES: PluginMessages = {
       [GitAction.CommitAll]: 'Создание commit',
       [GitAction.Push]: 'Создание commit и отправка',
       [GitAction.Sync]: 'Синхронизация',
+      [GitAction.Abort]: PLUGIN_FORMAT.emptyString,
     },
     success: {
       [GitAction.Status]: '',
@@ -27,6 +29,7 @@ export const RUSSIAN_MESSAGES: PluginMessages = {
       [GitAction.CommitAll]: 'Изменения хранилища сохранены в commit.',
       [GitAction.Push]: 'Push завершён.',
       [GitAction.Sync]: 'Синхронизация завершена.',
+      [GitAction.Abort]: 'Операция Git прервана.',
     },
   },
   ui: {
@@ -53,6 +56,7 @@ export const RUSSIAN_MESSAGES: PluginMessages = {
     gitErrorConsoleLabel: 'Ошибка команды Git',
     errorFallback: 'Не удалось выполнить команду Git.',
     errorEllipsis: '…',
+    operationAborted: 'Операция Git прервана.',
   },
   settings: {
     executableName: 'Исполняемый файл Git',

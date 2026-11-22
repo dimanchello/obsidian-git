@@ -23,8 +23,8 @@ export class GitCli {
     return this.execute(GitCommandType.Version, GIT_ARGUMENTS.version);
   }
 
-  public status(): Promise<GitCommand> {
-    return this.execute(GitCommandType.Status, GIT_ARGUMENTS.status);
+  public status(signal?: AbortSignal): Promise<GitCommand> {
+    return this.execute(GitCommandType.Status, GIT_ARGUMENTS.status, signal);
   }
 
   public fetch(signal?: AbortSignal): Promise<GitCommand> {

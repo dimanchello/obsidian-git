@@ -5,6 +5,7 @@ export enum GitAction {
   CommitAll = 'commit-all',
   Push = 'push',
   Sync = 'sync',
+  Abort = 'abort',
 }
 
 export const GIT_ACTION_ORDER = [
@@ -14,6 +15,7 @@ export const GIT_ACTION_ORDER = [
   GitAction.CommitAll,
   GitAction.Push,
   GitAction.Sync,
+  GitAction.Abort,
 ] as const;
 
 export const GIT_ACTION_COMMAND_IDS: Record<GitAction, string> = {
@@ -23,6 +25,7 @@ export const GIT_ACTION_COMMAND_IDS: Record<GitAction, string> = {
   [GitAction.CommitAll]: 'commit-all',
   [GitAction.Push]: 'push',
   [GitAction.Sync]: 'sync',
+  [GitAction.Abort]: 'abort-operation',
 };
 
 export const GIT_ACTION_ICONS: Record<GitAction, string> = {
@@ -32,6 +35,7 @@ export const GIT_ACTION_ICONS: Record<GitAction, string> = {
   [GitAction.CommitAll]: 'git-commit-horizontal',
   [GitAction.Push]: 'arrow-up',
   [GitAction.Sync]: 'refresh-cw',
+  [GitAction.Abort]: 'x-circle',
 };
 
 export const PLUGIN_DOM_NAMES = {

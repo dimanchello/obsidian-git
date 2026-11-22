@@ -10,4 +10,8 @@ export const I18N_TEST_VALUES = {
   englishUpToDate: 'Up to date',
   russianSectionStaged: 'Изменения в индексе',
   englishSectionStaged: 'Staged changes',
+  russianAbortAction: 'Отменить текущую операцию',
+  englishAbortAction: 'Abort current operation',
+  russianOperationAborted: 'Операция Git прервана.',
+  englishOperationAborted: 'Git operation was aborted.',
 } as const;

@@ -30,6 +30,7 @@ export interface PluginMessages {
     readonly gitErrorConsoleLabel: string;
     readonly errorFallback: string;
     readonly errorEllipsis: string;
+    readonly operationAborted: string;
   };
   readonly settings: {
     readonly executableName: string;

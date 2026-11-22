@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { GitCli } from '../src/git/git-cli';
-import { CommitOutcomeKind, GitCommandError, GitService } from '../src/git/git-service';
+import {
+  CommitOutcomeKind,
+  GitCommandError,
+  GitService,
+  isGitCommandAborted,
+} from '../src/git/git-service';
 import type { ProcessRequest, ProcessResult, ProcessRunner } from '../src/git/process-runner';
 import { GIT_TEST_ENVIRONMENT } from './git-test-context';
 import {
@@ -59,5 +64,21 @@ describe('GitService', () => {
       message: GIT_CLI_TEST_VALUES.noRepositoryMessage,
     });
     await expect(status).rejects.toBeInstanceOf(GitCommandError);
+  });
+
+  it('identifies an aborted command and rejects with an aborted GitCommandError', async () => {
+    const runner = new QueueRunner([GIT_CLI_PROCESS_RESULTS.aborted]);
+    const service = new GitService(
+      new GitCli(runner, {
+        executable: GIT_TEST_ENVIRONMENT.executable,
+        cwd: GIT_TEST_ENVIRONMENT.vaultPath,
+      }),
+    );
+
+    const controller = new AbortController();
+    controller.abort();
+    const fetchPromise = service.fetch(controller.signal);
+
+    await expect(fetchPromise).rejects.toSatisfy((error) => isGitCommandAborted(error));
   });
 });

@@ -11,6 +11,7 @@ export const ENGLISH_MESSAGES: PluginMessages = {
       [GitAction.CommitAll]: 'Commit all vault changes',
       [GitAction.Push]: 'Commit all changes and push',
       [GitAction.Sync]: 'Sync: commit, pull, and push',
+      [GitAction.Abort]: 'Abort current operation',
     },
     progress: {
       [GitAction.Status]: 'Loading Git status',
@@ -19,6 +20,7 @@ export const ENGLISH_MESSAGES: PluginMessages = {
       [GitAction.CommitAll]: 'Creating commit',
       [GitAction.Push]: 'Committing and pushing',
       [GitAction.Sync]: 'Syncing vault',
+      [GitAction.Abort]: PLUGIN_FORMAT.emptyString,
     },
     success: {
       [GitAction.Status]: '',
@@ -27,6 +29,7 @@ export const ENGLISH_MESSAGES: PluginMessages = {
       [GitAction.CommitAll]: 'Vault changes committed.',
       [GitAction.Push]: 'Push completed.',
       [GitAction.Sync]: 'Sync completed.',
+      [GitAction.Abort]: 'Git operation aborted.',
     },
   },
   ui: {
@@ -53,6 +56,7 @@ export const ENGLISH_MESSAGES: PluginMessages = {
     gitErrorConsoleLabel: 'Git command failed',
     errorFallback: 'Could not run the Git command.',
     errorEllipsis: '…',
+    operationAborted: 'Git operation was aborted.',
   },
   settings: {
     executableName: 'Git executable',

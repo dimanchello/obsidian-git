@@ -8,6 +8,8 @@ describe('getPluginMessages', () => {
     const messages = getPluginMessages(I18N_TEST_VALUES.russianRegionalCode);
 
     expect(messages.actions.labels[GitAction.Status]).toBe(I18N_TEST_VALUES.russianAction);
+    expect(messages.actions.labels[GitAction.Abort]).toBe(I18N_TEST_VALUES.russianAbortAction);
+    expect(messages.ui.operationAborted).toBe(I18N_TEST_VALUES.russianOperationAborted);
     expect(messages.statusModal.cleanWorkingTree).toBe(I18N_TEST_VALUES.russianCleanTitle);
     expect(messages.statusModal.upToDate).toBe(I18N_TEST_VALUES.russianUpToDate);
     expect(messages.statusModal.sectionStaged).toBe(I18N_TEST_VALUES.russianSectionStaged);
@@ -18,10 +20,14 @@ describe('getPluginMessages', () => {
     const fallback = getPluginMessages(I18N_TEST_VALUES.unsupportedLanguageCode);
 
     expect(english.actions.labels[GitAction.Status]).toBe(I18N_TEST_VALUES.englishAction);
+    expect(english.actions.labels[GitAction.Abort]).toBe(I18N_TEST_VALUES.englishAbortAction);
+    expect(english.ui.operationAborted).toBe(I18N_TEST_VALUES.englishOperationAborted);
     expect(english.statusModal.cleanWorkingTree).toBe(I18N_TEST_VALUES.englishCleanTitle);
     expect(english.statusModal.upToDate).toBe(I18N_TEST_VALUES.englishUpToDate);
     expect(english.statusModal.sectionStaged).toBe(I18N_TEST_VALUES.englishSectionStaged);
     expect(fallback.actions.labels[GitAction.Status]).toBe(I18N_TEST_VALUES.englishAction);
+    expect(fallback.actions.labels[GitAction.Abort]).toBe(I18N_TEST_VALUES.englishAbortAction);
+    expect(fallback.ui.operationAborted).toBe(I18N_TEST_VALUES.englishOperationAborted);
     expect(fallback.statusModal.cleanWorkingTree).toBe(I18N_TEST_VALUES.englishCleanTitle);
   });
 });

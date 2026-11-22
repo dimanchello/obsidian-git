@@ -1,6 +1,6 @@
 import { FileSystemAdapter, getLanguage, Menu, Notice, Plugin, setIcon } from 'obsidian';
 import { GitCli } from './git/git-cli';
-import { CommitOutcomeKind, GitService } from './git/git-service';
+import { CommitOutcomeKind, GitService, isGitCommandAborted } from './git/git-service';
 import { NodeProcessRunner } from './git/process-runner';
 import {
   GitExecutableLocator,
@@ -44,6 +44,7 @@ export default class GitCommandsPlugin extends Plugin {
   private statusBarIcon: HTMLElement | null = null;
   private statusBarText: HTMLElement | null = null;
   private operationRunning = false;
+  private activeAbortController: AbortController | null = null;
   private statusSummary: GitStatus | null = null;
   private autoFetchTimer: number | null = null;
   private autoSyncTimer: number | null = null;
@@ -176,29 +177,54 @@ export default class GitCommandsPlugin extends Plugin {
 
   private registerCommands(): void {
     for (const action of GIT_ACTION_ORDER) {
-      this.addCommand({
-        id: GIT_ACTION_COMMAND_IDS[action],
-        name: this.messages.ui.commandNamePrefix + this.messages.actions.labels[action],
-        callback: () => this.executeAction(action),
-      });
+      if (action === GitAction.Abort) {
+        this.addCommand({
+          id: GIT_ACTION_COMMAND_IDS[action],
+          name: this.messages.ui.commandNamePrefix + this.messages.actions.labels[action],
+          checkCallback: (checking) => {
+            if (checking) {
+              return this.operationRunning;
+            }
+            if (!this.operationRunning) {
+              return false;
+            }
+            this.abortCurrentOperation();
+            return true;
+          },
+        });
+      } else {
+        this.addCommand({
+          id: GIT_ACTION_COMMAND_IDS[action],
+          name: this.messages.ui.commandNamePrefix + this.messages.actions.labels[action],
+          callback: () => this.executeAction(action),
+        });
+      }
     }
   }
 
   private openMenu(event: MouseEvent): void {
     const menu = new Menu();
     for (const action of GIT_ACTION_ORDER) {
-      if (action === GitAction.Fetch) menu.addSeparator();
-      menu.addItem((item) =>
+      if (action === GitAction.Fetch || action === GitAction.Abort) menu.addSeparator();
+      menu.addItem((item) => {
         item
           .setTitle(this.messages.actions.labels[action])
-          .setIcon(GIT_ACTION_ICONS[action])
-          .onClick(() => this.executeAction(action)),
-      );
+          .setIcon(GIT_ACTION_ICONS[action]);
+        if (action === GitAction.Abort) {
+          item.setDisabled(!this.operationRunning);
+        }
+        item.onClick(() => this.executeAction(action));
+      });
     }
     menu.showAtMouseEvent(event);
   }
 
   private executeAction(action: GitAction): void {
+    if (action === GitAction.Abort) {
+      this.abortCurrentOperation();
+      return;
+    }
+
     if (action === GitAction.Status) {
       void this.showStatus();
       return;
@@ -209,26 +235,37 @@ export default class GitCommandsPlugin extends Plugin {
       return;
     }
 
-    void this.runAction(this.messages.actions.progress[action], async (git) => {
+    void this.runAction(this.messages.actions.progress[action], async (git, signal) => {
       switch (action) {
         case GitAction.Fetch:
-          await git.fetch();
+          await git.fetch(signal);
           break;
         case GitAction.Pull:
-          await git.pull();
+          await git.pull(signal);
           break;
         case GitAction.Push:
-          await this.saveAll(git);
-          await git.push();
+          await this.saveAll(git, signal);
+          await git.push(signal);
           break;
         case GitAction.Sync:
-          await this.saveAll(git);
-          await git.pull();
-          await git.push();
+          await this.saveAll(git, signal);
+          await git.pull(signal);
+          await git.push(signal);
           break;
       }
       new Notice(this.messages.actions.success[action]);
     });
+  }
+
+  public abortCurrentOperation(): void {
+    if (!this.operationRunning || this.activeAbortController === null) {
+      return;
+    }
+    this.activeAbortController.abort();
+  }
+
+  public isOperationRunning(): boolean {
+    return this.operationRunning;
   }
 
   private async showStatus(): Promise<void> {
@@ -245,8 +282,8 @@ export default class GitCommandsPlugin extends Plugin {
   }
 
   private async commitAll(): Promise<void> {
-    await this.runAction(this.messages.actions.progress[GitAction.CommitAll], async (git) => {
-      const outcome = await this.saveAll(git);
+    await this.runAction(this.messages.actions.progress[GitAction.CommitAll], async (git, signal) => {
+      const outcome = await this.saveAll(git, signal);
       const successMessage =
         outcome === CommitOutcomeKind.NoChanges
           ? this.messages.ui.noChangesToCommit
@@ -255,8 +292,8 @@ export default class GitCommandsPlugin extends Plugin {
     });
   }
 
-  private async saveAll(git: GitService): Promise<CommitOutcomeKind> {
-    const outcome = await git.commitAll(this.makeCommitMessage());
+  private async saveAll(git: GitService, signal?: AbortSignal): Promise<CommitOutcomeKind> {
+    const outcome = await git.commitAll(this.makeCommitMessage(), signal);
     return outcome.kind;
   }
 
@@ -299,21 +336,30 @@ export default class GitCommandsPlugin extends Plugin {
 
   private async runAction(
     label: string,
-    action: (git: GitService) => Promise<void>,
+    action: (git: GitService, signal: AbortSignal) => Promise<void>,
   ): Promise<void> {
     if (this.operationRunning) {
       new Notice(this.messages.ui.busyNotice);
       return;
     }
 
+    const abortController = new AbortController();
+    this.activeAbortController = abortController;
     this.operationRunning = true;
     this.setStatusBarRunning(true);
     this.setStatusText(this.messages.ui.statusBarBrand + this.messages.ui.statusBarSeparator + label);
     try {
-      await action(this.createService());
+      await action(this.createService(), abortController.signal);
     } catch (error) {
-      this.showError(error);
+      if (this.isAborted(error, abortController.signal)) {
+        new Notice(this.messages.ui.operationAborted);
+      } else {
+        this.showError(error);
+      }
     } finally {
+      if (this.activeAbortController === abortController) {
+        this.activeAbortController = null;
+      }
       this.operationRunning = false;
       this.setStatusBarRunning(false);
       await this.refreshStatus();
@@ -322,14 +368,24 @@ export default class GitCommandsPlugin extends Plugin {
 
   private async autoFetch(): Promise<void> {
     if (this.operationRunning) return;
+    const abortController = new AbortController();
+    this.activeAbortController = abortController;
     this.operationRunning = true;
     this.setStatusBarRunning(true);
     try {
-      await this.createService().fetch();
+      await this.createService().fetch(abortController.signal);
       await this.refreshStatus();
     } catch (error) {
-      this.setStatusTitle(this.messages.ui.autoFetchErrorPrefix + this.errorMessage(error));
+      if (this.isAborted(error, abortController.signal)) {
+        this.setStatusTitle(this.messages.ui.operationAborted);
+        new Notice(this.messages.ui.operationAborted);
+      } else {
+        this.setStatusTitle(this.messages.ui.autoFetchErrorPrefix + this.errorMessage(error));
+      }
     } finally {
+      if (this.activeAbortController === abortController) {
+        this.activeAbortController = null;
+      }
       this.operationRunning = false;
       this.setStatusBarRunning(false);
     }
@@ -337,6 +393,8 @@ export default class GitCommandsPlugin extends Plugin {
 
   private async autoSync(): Promise<void> {
     if (this.operationRunning) return;
+    const abortController = new AbortController();
+    this.activeAbortController = abortController;
     this.operationRunning = true;
     this.setStatusBarRunning(true);
     this.setStatusText(
@@ -346,17 +404,32 @@ export default class GitCommandsPlugin extends Plugin {
     );
     try {
       const git = this.createService();
-      await this.saveAll(git);
-      await git.pull();
-      await git.push();
+      await this.saveAll(git, abortController.signal);
+      await git.pull(abortController.signal);
+      await git.push(abortController.signal);
     } catch (error) {
-      this.setStatusTitle(this.messages.ui.autoSyncErrorPrefix + this.errorMessage(error));
-      console.error(this.messages.ui.gitErrorConsoleLabel, error);
+      if (this.isAborted(error, abortController.signal)) {
+        this.setStatusTitle(this.messages.ui.operationAborted);
+        new Notice(this.messages.ui.operationAborted);
+      } else {
+        this.setStatusTitle(this.messages.ui.autoSyncErrorPrefix + this.errorMessage(error));
+        console.error(this.messages.ui.gitErrorConsoleLabel, error);
+      }
     } finally {
+      if (this.activeAbortController === abortController) {
+        this.activeAbortController = null;
+      }
       this.operationRunning = false;
       this.setStatusBarRunning(false);
       await this.refreshStatus();
     }
+  }
+
+  private isAborted(error: unknown, signal: AbortSignal): boolean {
+    if (signal.aborted) {
+      return true;
+    }
+    return isGitCommandAborted(error);
   }
 
   private async refreshStatus(): Promise<void> {

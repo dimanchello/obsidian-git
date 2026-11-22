@@ -58,6 +58,10 @@ const PROCESS_ERROR_NAMES = {
   aborted: 'AbortError',
 } as const;
 
+const PROCESS_ERROR_CODES = {
+  aborted: 'ABORT_ERR',
+} as const;
+
 const JAVASCRIPT_TYPE_NAMES = {
   number: 'number',
 } as const;
@@ -106,7 +110,7 @@ export class NodeProcessRunner implements ProcessRunner {
           return;
         }
 
-        resolve(this.toResult(error, output));
+        resolve(this.toResult(error, output, request.signal));
       });
     });
   }
@@ -114,10 +118,15 @@ export class NodeProcessRunner implements ProcessRunner {
   private toResult(
     error: ExecFileException,
     output: { readonly stdout: string; readonly stderr: string },
+    signal?: AbortSignal,
   ): ProcessResult {
     const code = isNumericExitCode(error.code) ? error.code : null;
+    const isAborted =
+      error.name === PROCESS_ERROR_NAMES.aborted ||
+      error.code === PROCESS_ERROR_CODES.aborted ||
+      signal?.aborted === true;
     const termination =
-      error.name === PROCESS_ERROR_NAMES.aborted
+      isAborted
         ? ProcessTermination.Aborted
         : error.killed && error.signal === PROCESS_SIGNALS.terminated
           ? ProcessTermination.Timeout

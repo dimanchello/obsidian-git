@@ -60,5 +60,23 @@ describe('NodeProcessRunner', () => {
     expect(result.termination).toBe(ProcessTermination.LaunchError);
     expect(result.errorMessage).toContain(GIT_TEST_ENVIRONMENT.unavailableExecutable);
   });
+
+  it('terminates an aborted process with Aborted termination', async () => {
+    const runner = new NodeProcessRunner();
+    const controller = new AbortController();
+
+    const runPromise = runner.run({
+      executable: GIT_TEST_ENVIRONMENT.nodeExecutable,
+      args: [PROCESS_RUNNER_TEST_VALUES.evalFlag, PROCESS_RUNNER_TEST_PROGRAMS.sleep],
+      cwd: process.cwd(),
+      signal: controller.signal,
+    });
+
+    controller.abort();
+    const result = await runPromise;
+
+    expect(result.termination).toBe(ProcessTermination.Aborted);
+    expect(result.exitCode).toBeNull();
+  });
 });
 

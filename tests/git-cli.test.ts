@@ -89,4 +89,17 @@ describe('GitCli', () => {
       GIT_CLI_EXPECTED_ARGUMENTS.push,
     ]);
   });
+
+  it('forwards AbortSignal to process runner', async () => {
+    const runner = new RecordingRunner();
+    const git = new GitCli(runner, {
+      executable: GIT_TEST_ENVIRONMENT.executable,
+      cwd: GIT_TEST_ENVIRONMENT.vaultPath,
+    });
+    const controller = new AbortController();
+
+    await git.fetch(controller.signal);
+
+    expect(runner.requests[0]?.signal).toBe(controller.signal);
+  });
 });
