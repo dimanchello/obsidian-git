@@ -29,10 +29,18 @@ export enum FileStatusCode {
 
 const STATUS_FORMAT = {
   branchHeader: '# branch.head ',
+  upstreamHeader: '# branch.upstream ',
+  detachedHead: '(detached)',
   aheadBehindPattern: /^# branch\.ab \+(\d+) -(\d+)$/,
   untrackedPrefix: StatusRecordType.Untracked + ' ',
   fieldSeparator: ' ',
+  tabSeparator: '\t',
+  nullDelimiter: '\0',
+  pathSeparator: '/',
   lineBreakPattern: /\r?\n/,
+  leadingSlashesPattern: /^\/+/,
+  trailingSlashesPattern: /\/+$/,
+  trailingLineBreakPattern: /\r?\n$/,
 } as const;
 
 const STATUS_FIELD_INDEX = {
@@ -45,13 +53,46 @@ const STATUS_FIELD_INDEX = {
   ordinaryPathStart: 8,
   renamedPathStart: 9,
   unmergedPathStart: 10,
+  notFound: -1,
 } as const;
+
+const STATUS_RECORD_STEP = {
+  next: 1,
+} as const;
+
+const QUOTED_PATH_FORMAT = {
+  quoteCharacter: '"',
+  escapeCharacter: '\\',
+  minimumLength: 2,
+  firstInnerIndex: 1,
+  quoteLength: 1,
+  startIndex: 0,
+  singleStep: 1,
+  octalDigitCount: 3,
+  octalRadix: 8,
+  octalPattern: /^[0-7]{3}$/,
+} as const;
+
+const GIT_ESCAPE_BYTES: Readonly<Record<string, number>> = {
+  a: 0x07,
+  b: 0x08,
+  t: 0x09,
+  n: 0x0a,
+  v: 0x0b,
+  f: 0x0c,
+  r: 0x0d,
+  [QUOTED_PATH_FORMAT.quoteCharacter]: 0x22,
+  [QUOTED_PATH_FORMAT.escapeCharacter]: 0x5c,
+};
 
 export const STATUS_COUNT_DEFAULTS = {
   none: 0,
 } as const;
 
 const EMPTY_STRING = '';
+
+const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder();
 
 const MODIFIED_STATUS_CODES = new Set<FileStatusCode>([
   FileStatusCode.Modified,
@@ -63,51 +104,192 @@ export interface GitFileChange {
   readonly indexStatus: FileStatusCode;
   readonly worktreeStatus: FileStatusCode;
   readonly path: string;
+  readonly origPath?: string;
   readonly staged: boolean;
+  readonly unstaged: boolean;
+  readonly inVault: boolean;
 }
 
 export interface GitStatus {
   readonly branch: string | null;
+  readonly upstream: string | null;
   readonly ahead: number;
   readonly behind: number;
   readonly files: readonly GitFileChange[];
 }
 
-export function parseGitStatus(output: string): GitStatus {
-  let branch: string | null = null;
-  let ahead: number = STATUS_COUNT_DEFAULTS.none;
-  let behind: number = STATUS_COUNT_DEFAULTS.none;
-  const files: GitFileChange[] = [];
+/** Decode a C-style quoted Git pathname into UTF-8 text when surrounded by double quotes. */
+export function unquoteGitPath(rawPath: string): string {
+  if (
+    rawPath.length < QUOTED_PATH_FORMAT.minimumLength ||
+    !rawPath.startsWith(QUOTED_PATH_FORMAT.quoteCharacter) ||
+    !rawPath.endsWith(QUOTED_PATH_FORMAT.quoteCharacter)
+  ) {
+    return rawPath;
+  }
 
-  for (const line of output.split(STATUS_FORMAT.lineBreakPattern)) {
-    if (line.startsWith(STATUS_FORMAT.branchHeader)) {
-      branch = line.slice(STATUS_FORMAT.branchHeader.length);
+  const inner = rawPath.slice(
+    QUOTED_PATH_FORMAT.firstInnerIndex,
+    rawPath.length - QUOTED_PATH_FORMAT.quoteLength,
+  );
+  const bytes: number[] = [];
+  let unescapedStart: number = QUOTED_PATH_FORMAT.startIndex;
+
+  for (let index: number = QUOTED_PATH_FORMAT.startIndex; index < inner.length; index++) {
+    if (inner[index] !== QUOTED_PATH_FORMAT.escapeCharacter) {
       continue;
     }
 
-    const aheadBehind = line.match(STATUS_FORMAT.aheadBehindPattern);
+    if (index > unescapedStart) {
+      appendEncodedSlice(bytes, inner.slice(unescapedStart, index));
+    }
+
+    const nextIndex = index + QUOTED_PATH_FORMAT.singleStep;
+    const escaped = inner[nextIndex];
+    if (escaped === undefined) {
+      appendEncodedSlice(bytes, QUOTED_PATH_FORMAT.escapeCharacter);
+      unescapedStart = inner.length;
+      break;
+    }
+
+    const octalSlice = inner.slice(nextIndex, nextIndex + QUOTED_PATH_FORMAT.octalDigitCount);
+    if (QUOTED_PATH_FORMAT.octalPattern.test(octalSlice)) {
+      bytes.push(parseInt(octalSlice, QUOTED_PATH_FORMAT.octalRadix));
+      index += QUOTED_PATH_FORMAT.octalDigitCount;
+      unescapedStart = index + QUOTED_PATH_FORMAT.singleStep;
+      continue;
+    }
+
+    const escapedByte = GIT_ESCAPE_BYTES[escaped];
+    if (escapedByte !== undefined) {
+      bytes.push(escapedByte);
+    } else {
+      appendEncodedSlice(bytes, escaped);
+    }
+    index = nextIndex;
+    unescapedStart = index + QUOTED_PATH_FORMAT.singleStep;
+  }
+
+  if (unescapedStart < inner.length) {
+    appendEncodedSlice(bytes, inner.slice(unescapedStart));
+  }
+
+  return UTF8_DECODER.decode(Uint8Array.from(bytes));
+}
+
+function appendEncodedSlice(bytes: number[], text: string): void {
+  for (const byte of UTF8_ENCODER.encode(text)) {
+    bytes.push(byte);
+  }
+}
+
+/** Parse Git porcelain v2 `--branch` status output in either `-z` NUL-delimited or line-delimited form. */
+export function parseGitStatus(output: string, repoPrefix?: string): GitStatus {
+  let branch: string | null = null;
+  let upstream: string | null = null;
+  let ahead: number = STATUS_COUNT_DEFAULTS.none;
+  let behind: number = STATUS_COUNT_DEFAULTS.none;
+  const files: GitFileChange[] = [];
+  const normalizedPrefix = normalizeRepoPrefix(repoPrefix);
+  const isNullDelimited = output.includes(STATUS_FORMAT.nullDelimiter);
+  const records = output.split(
+    isNullDelimited ? STATUS_FORMAT.nullDelimiter : STATUS_FORMAT.lineBreakPattern,
+  );
+
+  for (let index = STATUS_COUNT_DEFAULTS.none; index < records.length; index++) {
+    const record = records[index];
+    if (record === undefined || record.length === EMPTY_STRING.length) {
+      continue;
+    }
+
+    if (record.startsWith(STATUS_FORMAT.branchHeader)) {
+      const rawBranch = record.slice(STATUS_FORMAT.branchHeader.length);
+      branch = rawBranch === STATUS_FORMAT.detachedHead ? null : rawBranch;
+      continue;
+    }
+
+    if (record.startsWith(STATUS_FORMAT.upstreamHeader)) {
+      const rawUpstream = record.slice(STATUS_FORMAT.upstreamHeader.length);
+      upstream = rawUpstream.length > EMPTY_STRING.length ? rawUpstream : null;
+      continue;
+    }
+
+    const aheadBehind = record.match(STATUS_FORMAT.aheadBehindPattern);
     if (aheadBehind !== null) {
       ahead = Number(aheadBehind[STATUS_FIELD_INDEX.branchAhead]);
       behind = Number(aheadBehind[STATUS_FIELD_INDEX.branchBehind]);
       continue;
     }
 
-    const file = parseFileLine(line);
-    if (file !== null) files.push(file);
+    const recordType = toStatusRecordType(record[STATUS_FIELD_INDEX.recordType]);
+    let nextOrigPath: string | undefined;
+    if (isNullDelimited && recordType === StatusRecordType.Renamed) {
+      const nextToken = records[index + STATUS_RECORD_STEP.next];
+      if (nextToken !== undefined) {
+        nextOrigPath = nextToken;
+        index += STATUS_RECORD_STEP.next;
+      }
+    }
+
+    const file = parseFileRecord(record, isNullDelimited, normalizedPrefix, nextOrigPath);
+    if (file !== null) {
+      files.push(file);
+    }
   }
 
-  return { branch, ahead, behind, files };
+  return { branch, upstream, ahead, behind, files };
 }
 
-function parseFileLine(line: string): GitFileChange | null {
-  const recordType = toStatusRecordType(line[STATUS_FIELD_INDEX.recordType]);
-  if (recordType === StatusRecordType.Untracked && line.startsWith(STATUS_FORMAT.untrackedPrefix)) {
+function normalizeRepoPrefix(repoPrefix?: string): string {
+  if (repoPrefix === undefined) return EMPTY_STRING;
+  const withoutTrailingLineBreak = repoPrefix.replace(
+    STATUS_FORMAT.trailingLineBreakPattern,
+    EMPTY_STRING,
+  );
+  const stripped = withoutTrailingLineBreak
+    .replace(STATUS_FORMAT.leadingSlashesPattern, EMPTY_STRING)
+    .replace(STATUS_FORMAT.trailingSlashesPattern, EMPTY_STRING);
+  if (stripped.length === EMPTY_STRING.length) return EMPTY_STRING;
+  return stripped + STATUS_FORMAT.pathSeparator;
+}
+
+function resolveVaultPath(
+  rawPath: string,
+  normalizedPrefix: string,
+): { readonly path: string; readonly inVault: boolean } {
+  if (normalizedPrefix.length === EMPTY_STRING.length) {
+    return { path: rawPath, inVault: true };
+  }
+  if (!rawPath.startsWith(normalizedPrefix)) {
+    return { path: rawPath, inVault: false };
+  }
+  const stripped = rawPath.slice(normalizedPrefix.length);
+  return {
+    path: stripped.length > EMPTY_STRING.length ? stripped : rawPath,
+    inVault: true,
+  };
+}
+
+function parseFileRecord(
+  record: string,
+  isNullDelimited: boolean,
+  normalizedPrefix: string,
+  nextOrigPath?: string,
+): GitFileChange | null {
+  const recordType = toStatusRecordType(record[STATUS_FIELD_INDEX.recordType]);
+  if (recordType === StatusRecordType.Untracked && record.startsWith(STATUS_FORMAT.untrackedPrefix)) {
+    const rawPath = record.slice(STATUS_FORMAT.untrackedPrefix.length);
+    const decodedPath = isNullDelimited ? rawPath : unquoteGitPath(rawPath);
+    if (decodedPath.length === EMPTY_STRING.length) return null;
+    const resolved = resolveVaultPath(decodedPath, normalizedPrefix);
     return {
       kind: ChangeKind.Untracked,
       indexStatus: FileStatusCode.Untracked,
       worktreeStatus: FileStatusCode.Untracked,
-      path: line.slice(STATUS_FORMAT.untrackedPrefix.length),
+      path: resolved.path,
       staged: false,
+      unstaged: false,
+      inVault: resolved.inVault,
     };
   }
 
@@ -119,23 +301,80 @@ function parseFileLine(line: string): GitFileChange | null {
     return null;
   }
 
-  const fields = line.split(STATUS_FORMAT.fieldSeparator);
+  const fields = record.split(STATUS_FORMAT.fieldSeparator);
   const status = fields[STATUS_FIELD_INDEX.status];
   if (status === undefined) return null;
 
   const pathStart = getPathStart(recordType);
-  const path = fields.slice(pathStart).join(STATUS_FORMAT.fieldSeparator);
-  if (path.length === EMPTY_STRING.length) return null;
+  const pathPayload = fields.slice(pathStart).join(STATUS_FORMAT.fieldSeparator);
+  if (pathPayload.length === EMPTY_STRING.length) return null;
+
+  const { targetPath, origPath: decodedOrigPath } = extractRecordPaths(
+    recordType,
+    pathPayload,
+    isNullDelimited,
+    nextOrigPath,
+  );
+  if (targetPath.length === EMPTY_STRING.length) return null;
+
+  const resolvedTarget = resolveVaultPath(targetPath, normalizedPrefix);
+  const resolvedOrigPath =
+    decodedOrigPath !== undefined && decodedOrigPath.length > EMPTY_STRING.length
+      ? resolveVaultPath(decodedOrigPath, normalizedPrefix).path
+      : undefined;
 
   const indexStatus = toFileStatusCode(status[STATUS_FIELD_INDEX.firstCharacter]);
   const worktreeStatus = toFileStatusCode(status[STATUS_FIELD_INDEX.secondCharacter]);
+  const kind = classifyChange(recordType, indexStatus, worktreeStatus);
+  const isConflictOrUntracked = kind === ChangeKind.Conflict || kind === ChangeKind.Untracked;
+  const staged =
+    !isConflictOrUntracked &&
+    indexStatus !== FileStatusCode.Unchanged &&
+    indexStatus !== FileStatusCode.Untracked;
+  const unstaged =
+    !isConflictOrUntracked &&
+    worktreeStatus !== FileStatusCode.Unchanged &&
+    worktreeStatus !== FileStatusCode.Untracked;
 
   return {
-    kind: classifyChange(recordType, indexStatus, worktreeStatus),
+    kind,
     indexStatus,
     worktreeStatus,
-    path,
-    staged: indexStatus !== FileStatusCode.Unchanged && indexStatus !== FileStatusCode.Untracked,
+    path: resolvedTarget.path,
+    ...(resolvedOrigPath === undefined ? {} : { origPath: resolvedOrigPath }),
+    staged,
+    unstaged,
+    inVault: resolvedTarget.inVault,
+  };
+}
+
+function extractRecordPaths(
+  recordType: StatusRecordType,
+  pathPayload: string,
+  isNullDelimited: boolean,
+  nextOrigPath?: string,
+): { readonly targetPath: string; readonly origPath?: string } {
+  if (recordType !== StatusRecordType.Renamed) {
+    return {
+      targetPath: isNullDelimited ? pathPayload : unquoteGitPath(pathPayload),
+    };
+  }
+
+  if (isNullDelimited) {
+    return {
+      targetPath: pathPayload,
+      ...(nextOrigPath === undefined ? {} : { origPath: nextOrigPath }),
+    };
+  }
+
+  const tabIndex = pathPayload.indexOf(STATUS_FORMAT.tabSeparator);
+  if (tabIndex === STATUS_FIELD_INDEX.notFound) {
+    return { targetPath: unquoteGitPath(pathPayload) };
+  }
+
+  return {
+    targetPath: unquoteGitPath(pathPayload.slice(STATUS_FIELD_INDEX.firstCharacter, tabIndex)),
+    origPath: unquoteGitPath(pathPayload.slice(tabIndex + STATUS_RECORD_STEP.next)),
   };
 }
 

@@ -1,19 +1,71 @@
+import { PullStrategy } from '../src/git/git-constants';
+import { AutoSyncNotificationMode, StatusBarClickAction } from '../src/settings';
+
 export const SETTINGS_TEST_VALUES = {
+  customTemplate: 'Custom template {datetime}',
   validInput: {
     gitExecutable: ' /custom/git ',
     autoFetchIntervalSeconds: 45.9,
     autoSyncIntervalMinutes: 15.8,
+    autoBackupAfterEditMinutes: 5.4,
+    autoPullOnLoad: true,
+    pullStrategy: PullStrategy.Rebase,
+    processTimeoutSeconds: 240.7,
+    autoSyncNotificationMode: AutoSyncNotificationMode.All,
+    statusBarClickAction: StatusBarClickAction.StatusModal,
+    showRibbonIcon: true,
     commitMessageTemplate: 'Backup {datetime}',
   },
   validOutput: {
     gitExecutable: '/custom/git',
     autoFetchIntervalSeconds: 45,
     autoSyncIntervalMinutes: 15,
+    autoBackupAfterEditMinutes: 5,
+    autoPullOnLoad: true,
+    pullStrategy: PullStrategy.Rebase,
+    processTimeoutSeconds: 240,
+    autoSyncNotificationMode: AutoSyncNotificationMode.All,
+    statusBarClickAction: StatusBarClickAction.StatusModal,
+    showRibbonIcon: true,
     commitMessageTemplate: 'Backup {datetime}',
   },
   invalidInput: {
     gitExecutable: ' ',
     autoFetchIntervalSeconds: -1,
     autoSyncIntervalMinutes: -5,
+    autoBackupAfterEditMinutes: Number.NaN,
+    autoPullOnLoad: 'true',
+    pullStrategy: 'octopus',
+    processTimeoutSeconds: 4.9,
+    autoSyncNotificationMode: 'verbose',
+    statusBarClickAction: 'sync',
+    showRibbonIcon: 1,
+    commitMessageTemplate: 42,
   },
+  overflowInput: {
+    autoFetchIntervalSeconds: 100_000,
+    autoSyncIntervalMinutes: 99_999,
+    autoBackupAfterEditMinutes: 5_000,
+    processTimeoutSeconds: 9_999,
+  },
+  fractionalPositiveInput: {
+    autoFetchIntervalSeconds: 0.5,
+    autoSyncIntervalMinutes: 0.25,
+    autoBackupAfterEditMinutes: 0.9,
+  },
+  zeroInput: {
+    autoFetchIntervalSeconds: -0,
+    autoSyncIntervalMinutes: 0,
+    autoBackupAfterEditMinutes: 0,
+  },
+  minimumTimeoutInput: {
+    processTimeoutSeconds: 5.9,
+  },
+  minimumTimeoutExpected: 5,
+  enumOverrideInput: {
+    pullStrategy: PullStrategy.FastForwardOnly,
+    autoSyncNotificationMode: AutoSyncNotificationMode.Silent,
+    statusBarClickAction: StatusBarClickAction.StatusModal,
+  },
+  customDefaultsTemplate: 'Fallback {datetime}',
 } as const;

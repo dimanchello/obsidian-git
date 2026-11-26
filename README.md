@@ -15,31 +15,41 @@ Supported desktop platforms: Linux, Windows, and macOS.
 ## Features
 
 - **Status Bar Indicator**: Real-time indicator in the Obsidian status bar displaying:
-  - Active branch name
-  - Working-tree change counts (modified, staged, untracked)
+  - Active branch name (or detached `HEAD` state)
+  - Working-tree change counts and merge conflict warning state
   - Commits ahead of or behind the remote tracking branch
-  - Interactive click menu with quick actions
+  - Configurable click/keyboard action: quick actions menu or interactive status modal
+  - Optional left ribbon shortcut icon
 - **Command Palette Actions**:
-  - `Show status`: Open an interactive modal displaying changed files and branch sync state
-  - `Fetch`: Fetch remote commits without altering working tree
-  - `Pull`: Pull remote changes from upstream
-  - `Commit all changes`: Stage all vault changes and create a commit
-  - `Push`: Push local commits to the upstream branch
-  - `Sync`: Pull latest remote commits then push local changes
+  - `Show status`: Open an interactive modal to inspect staged, unstaged, untracked, and conflicted files, stage/unstage/discard changes, view diffs, and trigger quick actions
+  - `Show commit history`: View recent repository commits with collapsible per-commit affected file lists
+  - `Fetch from remote`: Fetch remote commits without altering the working tree
+  - `Pull changes`: Pull remote changes using the configured pull strategy (`Merge`, `Rebase`, or `Fast-forward only`)
+  - `Commit all vault changes`: Flush open editors, stage all vault changes, and create a commit
+  - `Commit with custom message`: Flush open editors, stage all vault changes, and commit with a custom message entered in a modal
+  - `Push committed changes` (`Push (commits only)`): Push existing local commits to upstream without staging or creating a commit
+  - `Commit all changes and push` (`Commit & Push`): Flush open editors, stage and commit all vault changes, and push to upstream
+  - `Sync: commit, pull, and push`: Flush open editors, commit all changes, pull remote commits, and push local changes
+  - `Show last Git error`: View command line, exit code, timestamp, `stderr`, and `stdout` for the latest Git command error in this session
+  - `Initialize Git repository`: Run `git init` inside a vault that is not yet a Git repository
+  - `Abort current operation`: Cancel an in-progress Git command
 - **Automation**:
-  - Periodic background fetch (configurable interval; default 30s)
-  - Configurable auto-sync interval
+  - Periodic background fetch (configurable interval in seconds; default `30`)
+  - Configurable periodic auto-sync interval in minutes
+  - Configurable debounced auto-backup after editing in minutes (commits and pushes after edits settle)
+  - Optional auto-pull on startup
+  - Configurable background sync and backup notification mode (`Errors only`, `All`, or `Silent`)
 - **Customizable Commit Message**:
-  - Commit message template support with `{datetime}` timestamp substitution (e.g., `vault backup: {datetime}`)
+  - Commit message template support with `{datetime}` timestamp substitution (replaces all `{datetime}` occurrences)
 - **Executable Discovery**:
   - Automatic lookup in system `PATH` and common platform-specific directories (`/usr/bin/git`, `/usr/local/bin/git`, Program Files, Homebrew, Xcode command-line tools)
-  - Optional custom executable command or absolute path in settings
+  - Optional custom executable command or absolute path in settings, with an in-settings **Test Git** button
 - **Internationalization (i18n)**:
   - Automatic language selection matching Obsidian (English and Russian supported, graceful fallback to English)
 - **Safe Execution**:
   - Non-shell child process execution (`execFile`) with strict argument arrays to prevent shell injection
   - Terminal interactive prompts disabled (`GIT_TERMINAL_PROMPT=0`)
-  - Configurable process timeouts
+  - Configurable process timeouts (`5–3600` seconds; default `120`)
 
 ---
 
@@ -61,7 +71,7 @@ Trigger all operations quickly via the standard Obsidian Command Palette.
 ![Command Palette](docs/images/command-palette.png)
 
 ### Plugin Settings
-Configure custom Git executable paths, auto-fetch and auto-sync intervals, and commit message templates.
+Configure custom Git executable paths, auto-fetch and auto-sync intervals, pull strategy, notifications, and commit message templates.
 
 ![Plugin Settings](docs/images/settings.png)
 
@@ -71,7 +81,7 @@ Configure custom Git executable paths, auto-fetch and auto-sync intervals, and c
 
 1. **Obsidian Desktop** v1.8.7 or newer.
 2. **Git** installed on your operating system and accessible in `PATH` (or configured via plugin settings).
-3. Your vault must be inside an initialized Git repository (`git init`).
+3. Your vault must be inside an initialized Git repository (`git init`), or initialized using the `Initialize Git repository` command.
 
 ---
 
@@ -107,10 +117,17 @@ Configure custom Git executable paths, auto-fetch and auto-sync intervals, and c
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| **Git executable path** | *(empty)* | Optional path to the `git` binary. When blank, the plugin searches `PATH` and standard system locations. |
-| **Commit message template** | `vault backup: {datetime}` | Commit message format. `{datetime}` is replaced with the local date and time. |
-| **Auto-fetch interval (seconds)** | `30` | Interval between background fetches. Set to `0` to disable. |
-| **Auto-sync interval (minutes)** | `0` | Interval between background syncs (pull + push). Set to `0` to disable. |
+| **Git executable** | `git` | Command or full path to override `PATH` and standard install directory discovery. Includes a **Test Git** button to verify execution and version. |
+| **Automatic fetch interval** | `30` | Delay between background fetches in seconds (`0–86400`). Set to `0` to disable. |
+| **Automatic sync interval** | `0` | Delay between background syncs (`commit`, `pull`, `push`) in minutes (`0–10080`). Set to `0` to disable. |
+| **Auto-backup after editing** | `0` | Minutes to wait after the last file edit before committing and pushing (`0–1440`). Set to `0` to disable. |
+| **Auto-pull on startup** | `false` | Automatically pull changes from the remote repository when Obsidian starts. |
+| **Pull strategy** | `Merge (--no-rebase)` | How remote changes are integrated when pulling (`Merge`, `Rebase`, or `Fast-forward only`). |
+| **Git command timeout** | `120` | Maximum time in seconds to wait for a Git command before aborting (`5–3600`). |
+| **Background sync notifications** | `Errors only` | When automatic sync and backup show notices (`Errors only`, `All (success and errors)`, or `Silent`). |
+| **Status bar click action** | `Open actions menu` | Action when clicking or activating the Git status bar indicator (`Open actions menu` or `Open repository status modal`). |
+| **Show ribbon icon** | `false` | Add a Git shortcut icon to the left ribbon. |
+| **Commit message template** | *(localized default)* | Commit message format. `{datetime}` is replaced with the local date and time (blank falls back to the localized default `Vault backup before sync: {datetime}`). |
 
 ---
 
@@ -145,13 +162,20 @@ npm ci
 
 ## Architecture
 
-- [`src/main.ts`](file:///home/angus123/project/js/obsidian-git/src/main.ts) &mdash; Obsidian entry point, commands, status bar integration, and lifecycle management.
-- [`src/git/process-runner.ts`](file:///home/angus123/project/js/obsidian-git/src/git/process-runner.ts) &mdash; Node.js `execFile` abstraction avoiding shell interpolation.
-- [`src/git/git-cli.ts`](file:///home/angus123/project/js/obsidian-git/src/git/git-cli.ts) &mdash; Maps high-level operations to Git argument vectors.
-- [`src/git/git-executable-locator.ts`](file:///home/angus123/project/js/obsidian-git/src/git/git-executable-locator.ts) &mdash; Searches `PATH` and platform directories, validates with `git --version`.
-- [`src/git/git-service.ts`](file:///home/angus123/project/js/obsidian-git/src/git/git-service.ts) &mdash; Validates command exit codes and coordinates status, fetch, pull, commit, and push.
-- [`src/git/status-parser.ts`](file:///home/angus123/project/js/obsidian-git/src/git/status-parser.ts) &mdash; Parses Git porcelain v2 format.
-- [`src/i18n/`](file:///home/angus123/project/js/obsidian-git/src/i18n/) &mdash; Typed English and Russian translations.
+- [`src/main.ts`](src/main.ts) &mdash; Obsidian entry point, commands, status bar integration, background automation, and lifecycle management.
+- [`src/plugin-constants.ts`](src/plugin-constants.ts) &mdash; Shared plugin-level action identifiers, DOM constants, and formatting tokens.
+- [`src/settings.ts`](src/settings.ts) &mdash; Settings schema, defaults, validation bounds, and parser.
+- [`src/settings-tab.ts`](src/settings-tab.ts) &mdash; Obsidian settings tab UI and declarative controls.
+- [`src/status-modal.ts`](src/status-modal.ts) &mdash; Interactive repository status modal with file grouping, staging/unstaging, discard confirmation, and action triggers.
+- [`src/git-modals.ts`](src/git-modals.ts) &mdash; Commit message prompt, diff viewer, commit history, error diagnostics, and confirmation modals.
+- [`src/ui-helpers.ts`](src/ui-helpers.ts) &mdash; Shared modal button, icon, and keyboard activation helpers.
+- [`src/git/process-runner.ts`](src/git/process-runner.ts) &mdash; Node.js `execFile` abstraction avoiding shell interpolation.
+- [`src/git/git-cli.ts`](src/git/git-cli.ts) &mdash; Maps high-level operations to Git argument vectors.
+- [`src/git/git-constants.ts`](src/git/git-constants.ts) &mdash; Git argument vectors, pull strategies, exit codes, and conflict markers.
+- [`src/git/git-executable-locator.ts`](src/git/git-executable-locator.ts) &mdash; Searches `PATH` and platform directories, validates with `git --version`.
+- [`src/git/git-service.ts`](src/git/git-service.ts) &mdash; Validates command exit codes and coordinates status, fetch, pull, commit, push, staging, diff, log, and init.
+- [`src/git/status-parser.ts`](src/git/status-parser.ts) &mdash; Parses Git porcelain v2 format.
+- [`src/i18n/`](src/i18n/) &mdash; Typed English and Russian translations.
 
 ---
 

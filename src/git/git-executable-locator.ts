@@ -1,3 +1,4 @@
+import { access, constants as fsConstants, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import { NodeProcessRunner, ProcessTermination, type ProcessRunner } from './process-runner';
@@ -17,6 +18,7 @@ const PATH_SYNTAX = {
 const ENVIRONMENT_VARIABLES = {
   path: 'PATH',
   windowsPath: 'Path',
+  home: 'HOME',
   programFiles: 'ProgramFiles',
   programFilesX86: 'ProgramFiles(x86)',
   localAppData: 'LOCALAPPDATA',
@@ -72,14 +74,27 @@ const GIT_VERSION_PROBE = {
   timeoutMs: 5_000,
 } as const;
 
-const EMPTY_STRING = '';
-
-export const GIT_EXECUTABLE_RESOLUTION_STATE = {
-  firstGeneration: 0,
+const MACOS_DEVELOPER_TOOLS_PROBE = {
+  executable: '/usr/bin/xcode-select',
+  args: ['-p'],
+  timeoutMs: 2_000,
 } as const;
+
+const EMPTY_STRING = '';
 
 export interface GitExecutableProbe {
   isGitExecutable(executable: string, cwd: string): Promise<boolean>;
+  probeVersion?(executable: string, cwd: string): Promise<string | null>;
+}
+
+export interface GitLocatedExecutable {
+  readonly executable: string;
+  readonly version: string | null;
+}
+
+export interface NodeGitExecutableProbeOptions {
+  readonly platform?: NodeJS.Platform;
+  readonly canExecuteFile?: (executablePath: string) => Promise<boolean>;
 }
 
 export interface GitExecutableLocatorOptions {
@@ -90,19 +105,76 @@ export interface GitExecutableLocatorOptions {
 }
 
 export class NodeGitExecutableProbe implements GitExecutableProbe {
-  public constructor(private readonly runner: ProcessRunner = new NodeProcessRunner()) {}
+  private readonly platform: NodeJS.Platform;
+  private readonly canExecuteFile: (executablePath: string) => Promise<boolean>;
+
+  public constructor(
+    private readonly runner: ProcessRunner = new NodeProcessRunner(),
+    options: NodeGitExecutableProbeOptions = {},
+  ) {
+    this.platform = options.platform ?? process.platform;
+    this.canExecuteFile =
+      options.canExecuteFile ??
+      ((executablePath) => isExecutableFile(executablePath, this.platform));
+  }
 
   public async isGitExecutable(executable: string, cwd: string): Promise<boolean> {
+    return (await this.probeVersion(executable, cwd)) !== null;
+  }
+
+  /**
+   * Probes an executable candidate and returns its reported Git version, or null if invalid.
+   */
+  public async probeVersion(executable: string, cwd: string): Promise<string | null> {
+    const pathApi = this.platform === NODE_PLATFORMS.windows ? path.win32 : path.posix;
+    if (isPathLikeExecutable(executable, pathApi)) {
+      const canExecute = await this.canExecuteFile(executable);
+      if (!canExecute) {
+        return null;
+      }
+    }
+
+    if (
+      this.platform === NODE_PLATFORMS.macOS &&
+      executable === POSIX_GIT_EXECUTABLES.macOSSystemGitFallback &&
+      !(await this.hasMacOSCommandLineTools(cwd))
+    ) {
+      return null;
+    }
+
     const result = await this.runner.run({
       executable,
       args: GIT_ARGUMENTS.version,
       cwd,
       timeoutMs: GIT_VERSION_PROBE.timeoutMs,
     });
+    if (
+      result.exitCode !== GIT_EXIT_CODES.success ||
+      result.termination !== ProcessTermination.Exited
+    ) {
+      return null;
+    }
+
+    const trimmedOutput = result.stdout.trim();
+    if (!trimmedOutput.startsWith(GIT_VERSION_PROBE.outputPrefix)) {
+      return null;
+    }
+
+    const version = trimmedOutput.slice(GIT_VERSION_PROBE.outputPrefix.length).trim();
+    return version.length > EMPTY_STRING.length ? version : null;
+  }
+
+  private async hasMacOSCommandLineTools(cwd: string): Promise<boolean> {
+    const result = await this.runner.run({
+      executable: MACOS_DEVELOPER_TOOLS_PROBE.executable,
+      args: MACOS_DEVELOPER_TOOLS_PROBE.args,
+      cwd,
+      timeoutMs: MACOS_DEVELOPER_TOOLS_PROBE.timeoutMs,
+    });
     return (
       result.exitCode === GIT_EXIT_CODES.success &&
       result.termination === ProcessTermination.Exited &&
-      result.stdout.trim().startsWith(GIT_VERSION_PROBE.outputPrefix)
+      result.stdout.trim().length > EMPTY_STRING.length
     );
   }
 }
@@ -116,16 +188,37 @@ export class GitExecutableLocator {
   public constructor(options: GitExecutableLocatorOptions = {}) {
     this.platform = options.platform ?? process.platform;
     this.environment = options.environment ?? process.env;
-    this.homeDirectory =
-      options.homeDirectory ??
-      this.environment[ENVIRONMENT_VARIABLES.userProfile] ??
-      homedir();
-    this.probe = options.probe ?? new NodeGitExecutableProbe();
+    this.homeDirectory = resolveHomeDirectory(
+      this.platform,
+      this.environment,
+      options.homeDirectory,
+    );
+    this.probe =
+      options.probe ??
+      new NodeGitExecutableProbe(new NodeProcessRunner(), { platform: this.platform });
   }
 
   public async locate(configuredExecutable: string, cwd: string): Promise<string | null> {
+    const located = await this.locateWithVersion(configuredExecutable, cwd);
+    return located === null ? null : located.executable;
+  }
+
+  /**
+   * Resolves the first valid Git executable candidate along with its detected version.
+   */
+  public async locateWithVersion(
+    configuredExecutable: string,
+    cwd: string,
+  ): Promise<GitLocatedExecutable | null> {
     for (const candidate of this.getCandidates(configuredExecutable)) {
-      if (await this.probe.isGitExecutable(candidate, cwd)) return candidate;
+      if (this.probe.probeVersion !== undefined) {
+        const version = await this.probe.probeVersion(candidate, cwd);
+        if (version !== null) {
+          return { executable: candidate, version };
+        }
+      } else if (await this.probe.isGitExecutable(candidate, cwd)) {
+        return { executable: candidate, version: null };
+      }
     }
     return null;
   }
@@ -136,7 +229,7 @@ export class GitExecutableLocator {
 
     const pathApi = this.platform === NODE_PLATFORMS.windows ? path.win32 : path.posix;
     const executableNames = this.getExecutableNames(executable, pathApi);
-    if (this.isPathLike(executable, pathApi)) {
+    if (isPathLikeExecutable(executable, pathApi)) {
       return this.unique(executableNames);
     }
 
@@ -176,17 +269,6 @@ export class GitExecutableLocator {
       return [executable];
     }
     return [executable + PATH_SYNTAX.windowsExecutableSuffix, executable];
-  }
-
-  private isPathLike(
-    executable: string,
-    pathApi: path.PlatformPath,
-  ): boolean {
-    return (
-      pathApi.isAbsolute(executable) ||
-      executable.includes(PATH_SYNTAX.forwardSlash) ||
-      executable.includes(PATH_SYNTAX.backslash)
-    );
   }
 
   private isDefaultGitCommand(
@@ -297,5 +379,54 @@ export class GitExecutableLocator {
       seen.add(normalized);
       return true;
     });
+  }
+}
+
+function resolveHomeDirectory(
+  platform: NodeJS.Platform,
+  environment: NodeJS.ProcessEnv,
+  explicitHomeDirectory?: string,
+): string {
+  if (explicitHomeDirectory !== undefined) {
+    return explicitHomeDirectory;
+  }
+
+  const candidates =
+    platform === NODE_PLATFORMS.windows
+      ? [environment[ENVIRONMENT_VARIABLES.userProfile], environment[ENVIRONMENT_VARIABLES.home]]
+      : [environment[ENVIRONMENT_VARIABLES.home], environment[ENVIRONMENT_VARIABLES.userProfile]];
+
+  for (const candidate of candidates) {
+    if (candidate !== undefined && candidate.length > EMPTY_STRING.length) {
+      return candidate;
+    }
+  }
+
+  return homedir();
+}
+
+function isPathLikeExecutable(executable: string, pathApi: path.PlatformPath): boolean {
+  return (
+    pathApi.isAbsolute(executable) ||
+    executable.includes(PATH_SYNTAX.forwardSlash) ||
+    executable.includes(PATH_SYNTAX.backslash)
+  );
+}
+
+async function isExecutableFile(
+  executablePath: string,
+  platform: NodeJS.Platform,
+): Promise<boolean> {
+  try {
+    const fileStat = await stat(executablePath);
+    if (!fileStat.isFile()) {
+      return false;
+    }
+    const accessMode =
+      platform === NODE_PLATFORMS.windows ? fsConstants.F_OK : fsConstants.X_OK;
+    await access(executablePath, accessMode);
+    return true;
+  } catch {
+    return false;
   }
 }

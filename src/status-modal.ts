@@ -1,24 +1,18 @@
-import { Modal, setIcon, TFile, type App } from 'obsidian';
+import { Modal, TFile, type App } from 'obsidian';
 import { ChangeKind, type GitFileChange, type GitStatus } from './git/status-parser';
-import { GitAction, PLUGIN_DOM_NAMES, PLUGIN_FORMAT } from './plugin-constants';
+import { ConfirmModal } from './git-modals';
 import type { PluginMessages } from './i18n/types';
-
-const STATUS_MODAL_TAGS = {
-  div: 'div',
-  span: 'span',
-  button: 'button',
-  paragraph: 'p',
-  heading: 'h2',
-} as const;
-
-const STATUS_MODAL_ATTRIBUTES = {
-  title: 'title',
-  type: 'type',
-} as const;
-
-const BUTTON_TYPES = {
-  button: 'button',
-} as const;
+import { GitAction, PLUGIN_DOM_NAMES, PLUGIN_FORMAT } from './plugin-constants';
+import {
+  bindKeyboardActivation,
+  createModalButton,
+  JAVASCRIPT_TYPE_NAMES,
+  MODAL_BUTTON_CLASSES,
+  MODAL_SHARED_TAGS,
+  safeSetIcon,
+  splitFilePath,
+  type SplitPathResult,
+} from './ui-helpers';
 
 const STATUS_MODAL_CLASSES = {
   modal: 'git-status-modal',
@@ -28,12 +22,21 @@ const STATUS_MODAL_CLASSES = {
   branchIcon: 'git-status-branch-icon',
   branchName: 'git-status-branch-name',
   detachedBadge: 'git-status-detached-badge',
+  headerControls: 'git-status-header-controls',
   headerPills: 'git-status-header-pills',
   pill: 'git-status-pill',
   pillAhead: 'git-status-pill--ahead',
   pillBehind: 'git-status-pill--behind',
   pillSynced: 'git-status-pill--synced',
+  pillNoUpstream: 'git-status-pill--no-upstream',
   pillSummary: 'git-status-pill--summary',
+  refreshButton: 'git-status-refresh-btn',
+  refreshButtonIcon: 'git-status-refresh-btn-icon',
+  conflictBanner: 'git-status-conflict-banner',
+  conflictBannerIcon: 'git-status-conflict-banner-icon',
+  conflictBannerBody: 'git-status-conflict-banner-body',
+  conflictBannerTitle: 'git-status-conflict-banner-title',
+  conflictBannerDescription: 'git-status-conflict-banner-description',
   cleanContainer: 'git-status-clean-container',
   cleanIcon: 'git-status-clean-icon',
   cleanTitle: 'git-status-clean-title',
@@ -41,9 +44,11 @@ const STATUS_MODAL_CLASSES = {
   sectionsContainer: 'git-status-sections',
   section: 'git-status-section',
   sectionHeader: 'git-status-section-header',
+  sectionHeaderMeta: 'git-status-section-header-meta',
   sectionTitle: 'git-status-section-title',
   sectionTitleConflicts: 'git-status-section-title--conflicts',
   sectionCount: 'git-status-section-count',
+  sectionAction: 'git-status-section-action',
   fileList: 'git-status-file-list',
   fileRow: 'git-status-file-row',
   fileRowClickable: 'git-status-file-row--clickable',
@@ -55,30 +60,38 @@ const STATUS_MODAL_CLASSES = {
   badgeModified: 'git-status-badge--modified',
   badgeUntracked: 'git-status-badge--untracked',
   badgeOther: 'git-status-badge--other',
+  fileInfo: 'git-status-file-info',
+  filePathLine: 'git-status-file-path-line',
   filePath: 'git-status-file-path',
   fileFolder: 'git-status-file-folder',
   fileName: 'git-status-file-name',
+  fileOrigPath: 'git-status-file-orig-path',
+  fileExternalBadge: 'git-status-file-external-badge',
   fileHint: 'git-status-file-hint',
+  fileActions: 'git-status-file-actions',
+  actionButton: 'git-status-action-btn',
+  actionButtonDiff: 'git-status-action-btn--diff',
+  actionButtonStage: 'git-status-action-btn--stage',
+  actionButtonUnstage: 'git-status-action-btn--unstage',
+  actionButtonDiscard: 'git-status-action-btn--discard',
   footer: 'git-status-footer',
   footerSummary: 'git-status-footer-summary',
   footerActions: 'git-status-footer-actions',
-  buttonModCta: 'mod-cta',
 } as const;
 
 const STATUS_MODAL_ICONS = {
   branch: 'git-branch',
   checkCircle: 'check-circle-2',
   fileOpen: 'arrow-up-right',
+  refresh: 'refresh-cw',
+  warning: 'alert-triangle',
 } as const;
 
 const STATUS_MODAL_COUNTS = {
   none: 0,
-  pathSeparatorOffset: 1,
-  notFoundIndex: -1,
-  firstIndex: 0,
 } as const;
 
-const PATH_DELIMITER = '/';
+const CLASS_SEPARATOR = ' ';
 const OPEN_LINK_LEAF_DEFAULT = false;
 
 const CHANGE_KIND_BADGE_CLASSES: Record<ChangeKind, string> = {
@@ -91,35 +104,38 @@ const CHANGE_KIND_BADGE_CLASSES: Record<ChangeKind, string> = {
   [ChangeKind.Other]: STATUS_MODAL_CLASSES.badgeOther,
 };
 
-interface FileGroup {
+export enum StatusSectionKind {
+  Conflict = 'conflict',
+  Staged = 'staged',
+  Unstaged = 'unstaged',
+  Untracked = 'untracked',
+}
+
+export interface StatusFileGroup {
+  readonly kind: StatusSectionKind;
   readonly title: string;
   readonly files: readonly GitFileChange[];
   readonly isConflict?: boolean;
 }
 
-interface SplitPathResult {
-  readonly folder: string;
-  readonly name: string;
+export { splitFilePath, type SplitPathResult };
+
+export interface GitStatusModalCallbacks {
+  readonly onAction?: (action: GitAction) => void;
+  readonly onRefresh?: () => Promise<GitStatus | null>;
+  readonly onStageFile?: (file: GitFileChange) => Promise<GitStatus | null>;
+  readonly onUnstageFile?: (file: GitFileChange) => Promise<GitStatus | null>;
+  readonly onDiscardFile?: (file: GitFileChange) => Promise<GitStatus | null>;
+  readonly onStageAll?: () => Promise<GitStatus | null>;
+  readonly onUnstageAll?: () => Promise<GitStatus | null>;
+  readonly onViewDiff?: (file: GitFileChange, staged: boolean) => void;
 }
 
-export function splitFilePath(filePath: string): SplitPathResult {
-  const lastSlashIndex = filePath.lastIndexOf(PATH_DELIMITER);
-  if (lastSlashIndex === STATUS_MODAL_COUNTS.notFoundIndex) {
-    return { folder: PLUGIN_FORMAT.emptyString, name: filePath };
-  }
-  return {
-    folder: filePath.slice(
-      STATUS_MODAL_COUNTS.firstIndex,
-      lastSlashIndex + STATUS_MODAL_COUNTS.pathSeparatorOffset,
-    ),
-    name: filePath.slice(lastSlashIndex + STATUS_MODAL_COUNTS.pathSeparatorOffset),
-  };
-}
-
+/** Group changed files into ordered modal sections, placing dual-state entries in both staged and unstaged. */
 export function groupStatusFiles(
   files: readonly GitFileChange[],
   messages: PluginMessages['statusModal'],
-): readonly FileGroup[] {
+): readonly StatusFileGroup[] {
   const conflicts: GitFileChange[] = [];
   const staged: GitFileChange[] = [];
   const unstaged: GitFileChange[] = [];
@@ -128,19 +144,31 @@ export function groupStatusFiles(
   for (const file of files) {
     if (file.kind === ChangeKind.Conflict) {
       conflicts.push(file);
-    } else if (file.staged) {
+      continue;
+    }
+
+    if (file.staged) {
       staged.push(file);
-    } else if (file.kind === ChangeKind.Untracked) {
-      untracked.push(file);
-    } else {
+    }
+
+    if (file.unstaged) {
       unstaged.push(file);
+    }
+
+    if (!file.staged && !file.unstaged) {
+      if (file.kind === ChangeKind.Untracked) {
+        untracked.push(file);
+      } else {
+        unstaged.push(file);
+      }
     }
   }
 
-  const groups: FileGroup[] = [];
+  const groups: StatusFileGroup[] = [];
 
   if (conflicts.length > STATUS_MODAL_COUNTS.none) {
     groups.push({
+      kind: StatusSectionKind.Conflict,
       title: messages.sectionConflicts,
       files: conflicts,
       isConflict: true,
@@ -149,6 +177,7 @@ export function groupStatusFiles(
 
   if (staged.length > STATUS_MODAL_COUNTS.none) {
     groups.push({
+      kind: StatusSectionKind.Staged,
       title: messages.sectionStaged,
       files: staged,
     });
@@ -156,6 +185,7 @@ export function groupStatusFiles(
 
   if (unstaged.length > STATUS_MODAL_COUNTS.none) {
     groups.push({
+      kind: StatusSectionKind.Unstaged,
       title: messages.sectionUnstaged,
       files: unstaged,
     });
@@ -163,6 +193,7 @@ export function groupStatusFiles(
 
   if (untracked.length > STATUS_MODAL_COUNTS.none) {
     groups.push({
+      kind: StatusSectionKind.Untracked,
       title: messages.sectionUntracked,
       files: untracked,
     });
@@ -171,33 +202,46 @@ export function groupStatusFiles(
   return groups;
 }
 
-function safeSetIcon(element: HTMLElement, iconId: string): void {
-  if (typeof setIcon === 'function') {
-    setIcon(element, iconId);
-  }
-}
-
+/** Interactive repository status modal showing branch tracking, grouped file changes, and Git actions. */
 export class GitStatusModal extends Modal {
+  private currentStatus: GitStatus;
+  private busy = false;
+  private readonly callbacks: GitStatusModalCallbacks;
+
   public constructor(
     app: App,
-    private readonly status: GitStatus,
+    status: GitStatus,
     private readonly messages: PluginMessages,
-    private readonly onAction?: (action: GitAction) => void,
+    callbacksOrOnAction?: GitStatusModalCallbacks | ((action: GitAction) => void),
   ) {
     super(app);
+    this.currentStatus = status;
+    this.callbacks = normalizeCallbacks(callbacksOrOnAction);
   }
 
   public onOpen(): void {
-    const { contentEl, modalEl, titleEl } = this;
+    const { modalEl, titleEl } = this;
     modalEl.addClass(STATUS_MODAL_CLASSES.modal);
     titleEl.setText(this.messages.statusModal.title);
+    this.render();
+  }
 
+  public onClose(): void {
+    this.contentEl.empty();
+  }
+
+  private render(): void {
+    const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass(STATUS_MODAL_CLASSES.content);
 
     this.renderHeaderCard(contentEl);
 
-    if (this.status.files.length === STATUS_MODAL_COUNTS.none) {
+    if (this.hasConflicts()) {
+      this.renderConflictBanner(contentEl);
+    }
+
+    if (this.currentStatus.files.length === STATUS_MODAL_COUNTS.none) {
       this.renderCleanState(contentEl);
     } else {
       this.renderSections(contentEl);
@@ -206,8 +250,25 @@ export class GitStatusModal extends Modal {
     this.renderFooter(contentEl);
   }
 
-  public onClose(): void {
-    this.contentEl.empty();
+  private hasConflicts(): boolean {
+    return this.currentStatus.files.some((file) => file.kind === ChangeKind.Conflict);
+  }
+
+  private async runStatusUpdate(operation: () => Promise<GitStatus | null>): Promise<void> {
+    if (this.busy) {
+      return;
+    }
+    this.busy = true;
+    this.render();
+    try {
+      const nextStatus = await operation();
+      if (nextStatus !== null) {
+        this.currentStatus = nextStatus;
+      }
+    } finally {
+      this.busy = false;
+      this.render();
+    }
   }
 
   private renderHeaderCard(container: HTMLElement): void {
@@ -218,10 +279,10 @@ export class GitStatusModal extends Modal {
     const branchIconEl = branchContainer.createSpan({ cls: STATUS_MODAL_CLASSES.branchIcon });
     safeSetIcon(branchIconEl, STATUS_MODAL_ICONS.branch);
 
-    if (this.status.branch !== null) {
+    if (this.currentStatus.branch !== null) {
       branchContainer.createSpan({
         cls: STATUS_MODAL_CLASSES.branchName,
-        text: this.status.branch,
+        text: this.currentStatus.branch,
       });
     } else {
       branchContainer.createSpan({
@@ -230,34 +291,84 @@ export class GitStatusModal extends Modal {
       });
     }
 
-    const pillsContainer = card.createDiv({ cls: STATUS_MODAL_CLASSES.headerPills });
+    const controlsContainer = card.createDiv({ cls: STATUS_MODAL_CLASSES.headerControls });
+    const pillsContainer = controlsContainer.createDiv({ cls: STATUS_MODAL_CLASSES.headerPills });
 
-    if (this.status.ahead > STATUS_MODAL_COUNTS.none) {
-      const aheadPill = pillsContainer.createSpan({ cls: STATUS_MODAL_CLASSES.pill });
-      aheadPill.addClass(STATUS_MODAL_CLASSES.pillAhead);
-      aheadPill.setText(statusModal.aheadPrefix + this.status.ahead);
+    if (this.currentStatus.ahead > STATUS_MODAL_COUNTS.none) {
+      this.createPill(
+        pillsContainer,
+        STATUS_MODAL_CLASSES.pillAhead,
+        statusModal.aheadPrefix + this.currentStatus.ahead,
+      );
     }
 
-    if (this.status.behind > STATUS_MODAL_COUNTS.none) {
-      const behindPill = pillsContainer.createSpan({ cls: STATUS_MODAL_CLASSES.pill });
-      behindPill.addClass(STATUS_MODAL_CLASSES.pillBehind);
-      behindPill.setText(statusModal.behindPrefix + this.status.behind);
+    if (this.currentStatus.behind > STATUS_MODAL_COUNTS.none) {
+      this.createPill(
+        pillsContainer,
+        STATUS_MODAL_CLASSES.pillBehind,
+        statusModal.behindPrefix + this.currentStatus.behind,
+      );
     }
 
-    if (
-      this.status.ahead === STATUS_MODAL_COUNTS.none &&
-      this.status.behind === STATUS_MODAL_COUNTS.none
+    if (this.currentStatus.upstream === null) {
+      this.createPill(
+        pillsContainer,
+        STATUS_MODAL_CLASSES.pillNoUpstream,
+        statusModal.noUpstream,
+      );
+    } else if (
+      this.currentStatus.ahead === STATUS_MODAL_COUNTS.none &&
+      this.currentStatus.behind === STATUS_MODAL_COUNTS.none
     ) {
-      const syncedPill = pillsContainer.createSpan({ cls: STATUS_MODAL_CLASSES.pill });
-      syncedPill.addClass(STATUS_MODAL_CLASSES.pillSynced);
-      syncedPill.setText(statusModal.upToDate);
+      this.createPill(pillsContainer, STATUS_MODAL_CLASSES.pillSynced, statusModal.upToDate);
     }
 
-    if (this.status.files.length > STATUS_MODAL_COUNTS.none) {
-      const summaryPill = pillsContainer.createSpan({ cls: STATUS_MODAL_CLASSES.pill });
-      summaryPill.addClass(STATUS_MODAL_CLASSES.pillSummary);
-      summaryPill.setText(this.status.files.length + statusModal.changesCountSuffix);
+    if (this.currentStatus.files.length > STATUS_MODAL_COUNTS.none) {
+      this.createPill(
+        pillsContainer,
+        STATUS_MODAL_CLASSES.pillSummary,
+        this.currentStatus.files.length + statusModal.changesCountSuffix,
+      );
     }
+
+    const { onRefresh } = this.callbacks;
+    if (onRefresh !== undefined) {
+      createModalButton(controlsContainer, {
+        text: statusModal.refreshButton,
+        cls: STATUS_MODAL_CLASSES.refreshButton,
+        title: statusModal.refreshButton,
+        ariaLabel: statusModal.refreshButton,
+        icon: STATUS_MODAL_ICONS.refresh,
+        iconCls: STATUS_MODAL_CLASSES.refreshButtonIcon,
+        disabled: this.busy,
+        onClick: () => {
+          void this.runStatusUpdate(onRefresh);
+        },
+      });
+    }
+  }
+
+  private createPill(container: HTMLElement, modifierClass: string, text: string): void {
+    const pill = container.createSpan({ cls: STATUS_MODAL_CLASSES.pill });
+    pill.addClass(modifierClass);
+    pill.setText(text);
+  }
+
+  private renderConflictBanner(container: HTMLElement): void {
+    const { statusModal } = this.messages;
+    const banner = container.createDiv({ cls: STATUS_MODAL_CLASSES.conflictBanner });
+    const iconEl = banner.createSpan({ cls: STATUS_MODAL_CLASSES.conflictBannerIcon });
+    safeSetIcon(iconEl, STATUS_MODAL_ICONS.warning);
+
+    const bodyEl = banner.createDiv({ cls: STATUS_MODAL_CLASSES.conflictBannerBody });
+    bodyEl.createDiv({
+      cls: STATUS_MODAL_CLASSES.conflictBannerTitle,
+      text: statusModal.conflictBannerTitle,
+    });
+    bodyEl.createDiv({
+      cls: STATUS_MODAL_CLASSES.conflictBannerDescription,
+      text: statusModal.conflictBannerDescription,
+    });
   }
 
   private renderCleanState(container: HTMLElement): void {
@@ -266,12 +377,12 @@ export class GitStatusModal extends Modal {
     const iconEl = cleanContainer.createDiv({ cls: STATUS_MODAL_CLASSES.cleanIcon });
     safeSetIcon(iconEl, STATUS_MODAL_ICONS.checkCircle);
 
-    cleanContainer.createEl(STATUS_MODAL_TAGS.heading, {
+    cleanContainer.createEl(MODAL_SHARED_TAGS.heading, {
       cls: STATUS_MODAL_CLASSES.cleanTitle,
       text: statusModal.cleanWorkingTree,
     });
 
-    cleanContainer.createEl(STATUS_MODAL_TAGS.paragraph, {
+    cleanContainer.createEl(MODAL_SHARED_TAGS.paragraph, {
       cls: STATUS_MODAL_CLASSES.cleanDescription,
       text: statusModal.cleanWorkingTreeDescription,
     });
@@ -281,31 +392,65 @@ export class GitStatusModal extends Modal {
     const sectionsContainer = container.createDiv({
       cls: STATUS_MODAL_CLASSES.sectionsContainer,
     });
-    const groups = groupStatusFiles(this.status.files, this.messages.statusModal);
+    const groups = groupStatusFiles(this.currentStatus.files, this.messages.statusModal);
 
     for (const group of groups) {
       const sectionEl = sectionsContainer.createDiv({ cls: STATUS_MODAL_CLASSES.section });
-      const headerEl = sectionEl.createDiv({ cls: STATUS_MODAL_CLASSES.sectionHeader });
-
-      const titleSpan = headerEl.createSpan({ cls: STATUS_MODAL_CLASSES.sectionTitle });
-      if (group.isConflict) {
-        titleSpan.addClass(STATUS_MODAL_CLASSES.sectionTitleConflicts);
-      }
-      titleSpan.setText(group.title);
-
-      headerEl.createSpan({
-        cls: STATUS_MODAL_CLASSES.sectionCount,
-        text: String(group.files.length),
-      });
+      this.renderSectionHeader(sectionEl, group);
 
       const listEl = sectionEl.createDiv({ cls: STATUS_MODAL_CLASSES.fileList });
       for (const file of group.files) {
-        this.renderFileRow(listEl, file);
+        this.renderFileRow(listEl, file, group.kind);
       }
     }
   }
 
-  private renderFileRow(container: HTMLElement, file: GitFileChange): void {
+  private renderSectionHeader(sectionEl: HTMLElement, group: StatusFileGroup): void {
+    const { statusModal } = this.messages;
+    const headerEl = sectionEl.createDiv({ cls: STATUS_MODAL_CLASSES.sectionHeader });
+    const metaEl = headerEl.createDiv({ cls: STATUS_MODAL_CLASSES.sectionHeaderMeta });
+
+    const titleSpan = metaEl.createSpan({ cls: STATUS_MODAL_CLASSES.sectionTitle });
+    if (group.isConflict) {
+      titleSpan.addClass(STATUS_MODAL_CLASSES.sectionTitleConflicts);
+    }
+    titleSpan.setText(group.title);
+
+    metaEl.createSpan({
+      cls: STATUS_MODAL_CLASSES.sectionCount,
+      text: String(group.files.length),
+    });
+
+    const { onStageAll, onUnstageAll } = this.callbacks;
+    if (group.kind === StatusSectionKind.Staged && onUnstageAll !== undefined) {
+      createModalButton(headerEl, {
+        text: statusModal.unstageAllButton,
+        cls: STATUS_MODAL_CLASSES.sectionAction,
+        disabled: this.busy,
+        onClick: () => {
+          void this.runStatusUpdate(onUnstageAll);
+        },
+      });
+    } else if (
+      (group.kind === StatusSectionKind.Unstaged || group.kind === StatusSectionKind.Untracked) &&
+      onStageAll !== undefined
+    ) {
+      createModalButton(headerEl, {
+        text: statusModal.stageAllButton,
+        cls: STATUS_MODAL_CLASSES.sectionAction,
+        disabled: this.busy,
+        onClick: () => {
+          void this.runStatusUpdate(onStageAll);
+        },
+      });
+    }
+  }
+
+  private renderFileRow(
+    container: HTMLElement,
+    file: GitFileChange,
+    sectionKind: StatusSectionKind,
+  ): void {
     const { statusModal, changeLabels } = this.messages;
     const row = container.createDiv({ cls: STATUS_MODAL_CLASSES.fileRow });
 
@@ -314,30 +459,166 @@ export class GitStatusModal extends Modal {
     badgeEl.addClass(badgeCls);
     badgeEl.setText(changeLabels[file.kind] ?? statusModal.fallbackChangeLabel);
 
-    const pathEl = row.createDiv({ cls: STATUS_MODAL_CLASSES.filePath });
+    const fileInfoEl = row.createDiv({ cls: STATUS_MODAL_CLASSES.fileInfo });
+    const pathLineEl = fileInfoEl.createDiv({ cls: STATUS_MODAL_CLASSES.filePathLine });
+    const pathEl = pathLineEl.createDiv({ cls: STATUS_MODAL_CLASSES.filePath });
     const { folder, name } = splitFilePath(file.path);
     if (folder.length > STATUS_MODAL_COUNTS.none) {
       pathEl.createSpan({ cls: STATUS_MODAL_CLASSES.fileFolder, text: folder });
     }
     pathEl.createSpan({ cls: STATUS_MODAL_CLASSES.fileName, text: name });
-    pathEl.setAttribute(STATUS_MODAL_ATTRIBUTES.title, file.path);
+    pathEl.setAttribute(PLUGIN_DOM_NAMES.titleAttribute, file.path);
 
-    const abstractFile = this.app.vault.getAbstractFileByPath(file.path);
-    if (abstractFile instanceof TFile) {
-      row.addClass(STATUS_MODAL_CLASSES.fileRowClickable);
-      row.setAttribute(STATUS_MODAL_ATTRIBUTES.title, statusModal.openFileTooltip);
-      const hintEl = row.createSpan({ cls: STATUS_MODAL_CLASSES.fileHint });
-      safeSetIcon(hintEl, STATUS_MODAL_ICONS.fileOpen);
-
-      row.addEventListener(PLUGIN_DOM_NAMES.clickEvent, () => {
-        this.close();
-        void this.app.workspace.openLinkText(
-          file.path,
-          PLUGIN_FORMAT.emptyString,
-          OPEN_LINK_LEAF_DEFAULT,
-        );
+    if (!file.inVault) {
+      pathLineEl.createSpan({
+        cls: STATUS_MODAL_CLASSES.fileExternalBadge,
+        text: statusModal.externalFileBadge,
       });
     }
+
+    if (file.origPath !== undefined && file.origPath.length > STATUS_MODAL_COUNTS.none) {
+      fileInfoEl.createDiv({
+        cls: STATUS_MODAL_CLASSES.fileOrigPath,
+        text: statusModal.renamedFromPrefix + file.origPath,
+      });
+    }
+
+    if (file.inVault) {
+      const abstractFile = this.app.vault.getAbstractFileByPath(file.path);
+      if (abstractFile instanceof TFile) {
+        row.addClass(STATUS_MODAL_CLASSES.fileRowClickable);
+        row.setAttribute(PLUGIN_DOM_NAMES.titleAttribute, statusModal.openFileTooltip);
+        row.setAttribute(PLUGIN_DOM_NAMES.roleAttribute, PLUGIN_DOM_NAMES.buttonRole);
+        row.setAttribute(PLUGIN_DOM_NAMES.tabIndexAttribute, PLUGIN_DOM_NAMES.initialTabIndex);
+
+        const hintEl = row.createSpan({ cls: STATUS_MODAL_CLASSES.fileHint });
+        safeSetIcon(hintEl, STATUS_MODAL_ICONS.fileOpen);
+
+        bindKeyboardActivation(row, () => {
+          this.openVaultFile(abstractFile, file.path);
+        });
+      }
+    }
+
+    this.renderFileRowActions(row, file, sectionKind);
+  }
+
+  private renderFileRowActions(
+    row: HTMLElement,
+    file: GitFileChange,
+    sectionKind: StatusSectionKind,
+  ): void {
+    const { statusModal, modals } = this.messages;
+    const { onViewDiff, onStageFile, onUnstageFile, onDiscardFile } = this.callbacks;
+
+    const canViewDiff = onViewDiff !== undefined && file.kind !== ChangeKind.Untracked;
+    const canUnstage = sectionKind === StatusSectionKind.Staged && onUnstageFile !== undefined;
+    const isWorkingSection =
+      sectionKind === StatusSectionKind.Unstaged || sectionKind === StatusSectionKind.Untracked;
+    const canStage = isWorkingSection && onStageFile !== undefined;
+    const canDiscard = isWorkingSection && onDiscardFile !== undefined;
+
+    if (!canViewDiff && !canUnstage && !canStage && !canDiscard) {
+      return;
+    }
+
+    const actionsEl = row.createDiv({ cls: STATUS_MODAL_CLASSES.fileActions });
+
+    if (onViewDiff !== undefined && file.kind !== ChangeKind.Untracked) {
+      createModalButton(actionsEl, {
+        text: statusModal.diffButton,
+        cls:
+          STATUS_MODAL_CLASSES.actionButton +
+          CLASS_SEPARATOR +
+          STATUS_MODAL_CLASSES.actionButtonDiff,
+        title: statusModal.diffButton,
+        ariaLabel: statusModal.diffButton,
+        stopPropagation: true,
+        onClick: () => {
+          onViewDiff(file, sectionKind === StatusSectionKind.Staged);
+        },
+      });
+    }
+
+    if (sectionKind === StatusSectionKind.Staged && onUnstageFile !== undefined) {
+      createModalButton(actionsEl, {
+        text: statusModal.unstageButton,
+        cls:
+          STATUS_MODAL_CLASSES.actionButton +
+          CLASS_SEPARATOR +
+          STATUS_MODAL_CLASSES.actionButtonUnstage,
+        title: statusModal.unstageButton,
+        ariaLabel: statusModal.unstageButton,
+        disabled: this.busy,
+        stopPropagation: true,
+        onClick: () => {
+          void this.runStatusUpdate(() => onUnstageFile(file));
+        },
+      });
+    }
+
+    if (isWorkingSection && onStageFile !== undefined) {
+      createModalButton(actionsEl, {
+        text: statusModal.stageButton,
+        cls:
+          STATUS_MODAL_CLASSES.actionButton +
+          CLASS_SEPARATOR +
+          STATUS_MODAL_CLASSES.actionButtonStage,
+        title: statusModal.stageButton,
+        ariaLabel: statusModal.stageButton,
+        disabled: this.busy,
+        stopPropagation: true,
+        onClick: () => {
+          void this.runStatusUpdate(() => onStageFile(file));
+        },
+      });
+    }
+
+    if (isWorkingSection && onDiscardFile !== undefined) {
+      createModalButton(actionsEl, {
+        text: statusModal.discardButton,
+        cls:
+          STATUS_MODAL_CLASSES.actionButton +
+          CLASS_SEPARATOR +
+          STATUS_MODAL_CLASSES.actionButtonDiscard,
+        title: statusModal.discardButton,
+        ariaLabel: statusModal.discardButton,
+        disabled: this.busy,
+        stopPropagation: true,
+        onClick: () => {
+          new ConfirmModal(
+            this.app,
+            modals.confirmDiscard.title,
+            modals.confirmDiscard.descriptionPrefix + file.path,
+            modals.confirmDiscard.confirmButton,
+            modals.confirmDiscard.cancelButton,
+            () => {
+              void this.runStatusUpdate(() => onDiscardFile(file));
+            },
+          ).open();
+        },
+      });
+    }
+  }
+
+  private openVaultFile(abstractFile: TFile, filePath: string): void {
+    this.close();
+    if (typeof this.app.workspace.getLeaf === JAVASCRIPT_TYPE_NAMES.function) {
+      const leaf = this.app.workspace.getLeaf(OPEN_LINK_LEAF_DEFAULT);
+      if (
+        leaf !== null &&
+        leaf !== undefined &&
+        typeof leaf.openFile === JAVASCRIPT_TYPE_NAMES.function
+      ) {
+        void leaf.openFile(abstractFile);
+        return;
+      }
+    }
+    void this.app.workspace.openLinkText(
+      filePath,
+      PLUGIN_FORMAT.emptyString,
+      OPEN_LINK_LEAF_DEFAULT,
+    );
   }
 
   private renderFooter(container: HTMLElement): void {
@@ -345,10 +626,12 @@ export class GitStatusModal extends Modal {
     const footer = container.createDiv({ cls: STATUS_MODAL_CLASSES.footer });
 
     const summaryEl = footer.createDiv({ cls: STATUS_MODAL_CLASSES.footerSummary });
-    const totalCount = this.status.files.length;
+    const totalCount = this.currentStatus.files.length;
     let stagedCount = STATUS_MODAL_COUNTS.none;
-    for (const file of this.status.files) {
-      if (file.staged) stagedCount++;
+    for (const file of this.currentStatus.files) {
+      if (file.kind !== ChangeKind.Conflict && file.staged) {
+        stagedCount++;
+      }
     }
 
     if (totalCount > STATUS_MODAL_COUNTS.none) {
@@ -360,36 +643,79 @@ export class GitStatusModal extends Modal {
     }
 
     const actionsEl = footer.createDiv({ cls: STATUS_MODAL_CLASSES.footerActions });
+    const { onAction } = this.callbacks;
+    const hasConflicts = this.hasConflicts();
 
-    if (this.onAction !== undefined) {
+    if (onAction !== undefined) {
       if (totalCount > STATUS_MODAL_COUNTS.none) {
-        const commitBtn = actionsEl.createEl(STATUS_MODAL_TAGS.button, {
-          cls: STATUS_MODAL_CLASSES.buttonModCta,
+        createModalButton(actionsEl, {
           text: statusModal.commitButton,
+          cls: MODAL_BUTTON_CLASSES.cta,
+          disabled: hasConflicts || this.busy,
+          onClick: () => {
+            this.close();
+            onAction(GitAction.CommitAll);
+          },
         });
-        commitBtn.setAttribute(STATUS_MODAL_ATTRIBUTES.type, BUTTON_TYPES.button);
-        commitBtn.addEventListener(PLUGIN_DOM_NAMES.clickEvent, () => {
-          this.close();
-          this.onAction?.(GitAction.CommitAll);
+
+        createModalButton(actionsEl, {
+          text: statusModal.commitWithMessageButton,
+          disabled: hasConflicts || this.busy,
+          onClick: () => {
+            this.close();
+            onAction(GitAction.CommitWithMessage);
+          },
         });
       }
 
-      const syncBtn = actionsEl.createEl(STATUS_MODAL_TAGS.button, {
-        text: statusModal.syncButton,
+      createModalButton(actionsEl, {
+        text: statusModal.pullButton,
+        disabled: this.busy,
+        onClick: () => {
+          this.close();
+          onAction(GitAction.Pull);
+        },
       });
-      syncBtn.setAttribute(STATUS_MODAL_ATTRIBUTES.type, BUTTON_TYPES.button);
-      syncBtn.addEventListener(PLUGIN_DOM_NAMES.clickEvent, () => {
-        this.close();
-        this.onAction?.(GitAction.Sync);
+
+      createModalButton(actionsEl, {
+        text: statusModal.pushButton,
+        disabled: this.busy,
+        onClick: () => {
+          this.close();
+          onAction(GitAction.PushOnly);
+        },
+      });
+
+      createModalButton(actionsEl, {
+        text: statusModal.syncButton,
+        disabled: hasConflicts || this.busy,
+        onClick: () => {
+          this.close();
+          onAction(GitAction.Sync);
+        },
       });
     }
 
-    const closeBtn = actionsEl.createEl(STATUS_MODAL_TAGS.button, {
+    createModalButton(actionsEl, {
       text: statusModal.closeButton,
-    });
-    closeBtn.setAttribute(STATUS_MODAL_ATTRIBUTES.type, BUTTON_TYPES.button);
-    closeBtn.addEventListener(PLUGIN_DOM_NAMES.clickEvent, () => {
-      this.close();
+      onClick: () => {
+        this.close();
+      },
     });
   }
+}
+
+function normalizeCallbacks(
+  callbacksOrOnAction?: GitStatusModalCallbacks | ((action: GitAction) => void),
+): GitStatusModalCallbacks {
+  if (isActionCallback(callbacksOrOnAction)) {
+    return { onAction: callbacksOrOnAction };
+  }
+  return callbacksOrOnAction ?? {};
+}
+
+function isActionCallback(
+  value: GitStatusModalCallbacks | ((action: GitAction) => void) | undefined,
+): value is (action: GitAction) => void {
+  return typeof value === JAVASCRIPT_TYPE_NAMES.function;
 }

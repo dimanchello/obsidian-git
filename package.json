@@ -1,6 +1,6 @@
 {
   "name": "obsidian-git",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Run Git commands for a vault",
   "author": "dimanchello",
   "license": "MIT",
@@ -29,7 +29,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run test",
-    "test:unit": "vitest run tests/git-cli.test.ts tests/process-runner.test.ts tests/status-parser.test.ts tests/settings.test.ts tests/git-service.test.ts tests/i18n.test.ts tests/git-executable-locator.test.ts tests/status-modal.test.ts",
+    "test:unit": "vitest run tests/git-cli.test.ts tests/process-runner.test.ts tests/status-parser.test.ts tests/settings.test.ts tests/git-service.test.ts tests/i18n.test.ts tests/git-executable-locator.test.ts tests/status-modal.test.ts tests/settings-tab.test.ts tests/plugin.test.ts tests/git-modals.test.ts",
     "test:integration": "vitest run tests/git-cli.integration.test.ts"
   },
   "devDependencies": {

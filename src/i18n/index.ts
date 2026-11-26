@@ -3,7 +3,10 @@ import { ENGLISH_MESSAGES } from './en';
 import { RUSSIAN_MESSAGES } from './ru';
 import type { PluginMessages } from './types';
 
-const LOCALE_TAG_SEPARATOR = '-';
+const LOCALE_TAG_FORMAT = {
+  separatorPattern: /[-_]/,
+  primarySubtagIndex: 0,
+} as const;
 
 const LOCALE_MESSAGES: Readonly<Record<PluginLanguage, PluginMessages>> = {
   [PluginLanguage.English]: ENGLISH_MESSAGES,
@@ -11,7 +14,10 @@ const LOCALE_MESSAGES: Readonly<Record<PluginLanguage, PluginMessages>> = {
 };
 
 export function getPluginMessages(languageCode: string): PluginMessages {
-  const primaryLanguageCode = languageCode.trim().toLowerCase().split(LOCALE_TAG_SEPARATOR)[0];
+  const primaryLanguageCode = languageCode
+    .trim()
+    .toLowerCase()
+    .split(LOCALE_TAG_FORMAT.separatorPattern)[LOCALE_TAG_FORMAT.primarySubtagIndex];
   const language =
     primaryLanguageCode === PluginLanguage.Russian
       ? PluginLanguage.Russian
