@@ -60,6 +60,8 @@ export const SETTINGS_TAB_TEST_CONSTANTS = {
   testCommitTemplate: 'chore: update {datetime}',
   emptyCommitTemplate: '',
   unknownSettingKey: 'nonExistentSetting',
+  windowGlobalName: 'window',
+  apiVersionErrorMessage: '1.13.0',
   expectedControlTypes: {
     text: 'text',
     number: 'number',

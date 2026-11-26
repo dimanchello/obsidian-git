@@ -480,6 +480,7 @@ vi.mock('obsidian', () => {
     Notice: MockNotice,
     setIcon: mockSetIcon,
     getLanguage: vi.fn(() => PLUGIN_TEST_VALUES.englishLanguage),
+    requireApiVersion: vi.fn(() => false),
     FileSystemAdapter: MockFileSystemAdapter,
     MarkdownView: MockMarkdownView,
     TextFileView: class {},
@@ -547,6 +548,7 @@ function failureResult(
 function createVaultTestHarness(options?: {
   readonly storedSettings?: Partial<GitPluginSettings>;
   readonly leaves?: readonly unknown[];
+  readonly configDir?: string;
 }) {
   const vaultListeners = new Map<string, (() => void)[]>();
   const savedSettingsHistory: unknown[] = [];
@@ -555,6 +557,7 @@ function createVaultTestHarness(options?: {
   const app = {
     vault: {
       adapter: new MockFileSystemAdapter(PLUGIN_TEST_VALUES.vaultPath),
+      configDir: options?.configDir ?? PLUGIN_TEST_VALUES.defaultConfigDir,
       on: vi.fn((eventName: string, cb: () => void) => {
         const list = vaultListeners.get(eventName) ?? [];
         list.push(cb);
@@ -671,12 +674,14 @@ describe('GitCommandsPlugin', () => {
   it('loads without blocking on git executable discovery or status and warns once when workspace files are tracked', async () => {
     const locateDeferred = createDeferred<string | null>();
     const statusDeferred = createDeferred<ProcessResult>();
+    const lsFilesRequests: ProcessRequest[] = [];
     vi.spyOn(GitExecutableLocator.prototype, 'locate').mockReturnValue(locateDeferred.promise);
     vi.spyOn(NodeProcessRunner.prototype, 'run').mockImplementation(async (request) => {
       if (isStatusInvocation(request.args)) {
         return statusDeferred.promise;
       }
       if (isLsFilesInvocation(request.args)) {
+        lsFilesRequests.push(request);
         return successResult(PLUGIN_TEST_VALUES.trackedWorkspaceOutput);
       }
       return successResult();
@@ -707,6 +712,43 @@ describe('GitCommandsPlugin', () => {
     await flushMicrotasks();
 
     expect(getStatusBarElement().getFullText()).toBe(PLUGIN_TEST_VALUES.expectedCleanStatusText);
+    expect(lsFilesRequests).toHaveLength(PLUGIN_TEST_VALUES.oneCount);
+    expect(lsFilesRequests[PLUGIN_TEST_VALUES.firstIndex]?.args).toEqual(
+      expect.arrayContaining([...PLUGIN_TEST_VALUES.expectedDefaultWorkspacePaths]),
+    );
+    expect(
+      recordedNotices.some((n) => n.message === plugin.messages.ui.workspaceFileTrackedWarning),
+    ).toBe(true);
+
+    plugin.onunload();
+  });
+
+  it('uses Vault#configDir when checking for tracked Obsidian workspace files', async () => {
+    const lsFilesRequests: ProcessRequest[] = [];
+    vi.spyOn(GitExecutableLocator.prototype, 'locate').mockResolvedValue(
+      PLUGIN_TEST_VALUES.resolvedGitExecutable,
+    );
+    vi.spyOn(NodeProcessRunner.prototype, 'run').mockImplementation(async (request) => {
+      if (isStatusInvocation(request.args)) {
+        return successResult(PLUGIN_TEST_VALUES.statusCleanOutput);
+      }
+      if (isLsFilesInvocation(request.args)) {
+        lsFilesRequests.push(request);
+        return successResult(PLUGIN_TEST_VALUES.customTrackedWorkspaceOutput);
+      }
+      return successResult();
+    });
+
+    const { plugin } = createVaultTestHarness({
+      configDir: PLUGIN_TEST_VALUES.customConfigDir,
+    });
+    await plugin.onload();
+    await flushMicrotasks();
+
+    expect(lsFilesRequests).toHaveLength(PLUGIN_TEST_VALUES.oneCount);
+    expect(lsFilesRequests[PLUGIN_TEST_VALUES.firstIndex]?.args).toEqual(
+      expect.arrayContaining([...PLUGIN_TEST_VALUES.expectedCustomWorkspacePaths]),
+    );
     expect(
       recordedNotices.some((n) => n.message === plugin.messages.ui.workspaceFileTrackedWarning),
     ).toBe(true);

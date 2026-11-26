@@ -1,5 +1,6 @@
 import {
   PluginSettingTab,
+  requireApiVersion,
   Setting,
   type ButtonComponent,
   type DropdownComponent,
@@ -21,6 +22,10 @@ import {
   StatusBarClickAction,
   type GitPluginSettings,
 } from './settings';
+
+const OBSIDIAN_API_VERSIONS = {
+  settingErrorMessage: '1.13.0',
+} as const;
 
 const SETTING_CONTROL_TYPES = {
   text: 'text',
@@ -81,8 +86,6 @@ enum SettingRowKind {
   Dropdown = 'dropdown',
   Button = 'button',
 }
-
-type SettingPropertyKey = keyof GitPluginSettings;
 
 type TextSettingKey =
   | typeof SETTING_PROPERTY_KEYS.gitExecutable
@@ -174,7 +177,7 @@ interface ParsedIntegerResult {
 
 interface PendingExecutableUpdate {
   value: string;
-  timer: ReturnType<typeof setTimeout>;
+  timer: number;
   readonly resolvers: Array<{
     readonly resolve: () => void;
     readonly reject: (reason?: unknown) => void;
@@ -711,11 +714,11 @@ export class GitSettingsTab extends PluginSettingTab {
       const existing = this.pendingExecutableUpdate;
       const resolvers = existing?.resolvers ?? [];
       if (existing !== null) {
-        clearTimeout(existing.timer);
+        window.clearTimeout(existing.timer);
       }
       resolvers.push({ resolve, reject });
 
-      const timer = setTimeout(() => {
+      const timer = window.setTimeout(() => {
         void this.executePendingExecutableUpdate();
       }, this.executableDebounceMs);
 
@@ -733,7 +736,7 @@ export class GitSettingsTab extends PluginSettingTab {
       return;
     }
     this.pendingExecutableUpdate = null;
-    clearTimeout(pending.timer);
+    window.clearTimeout(pending.timer);
 
     try {
       await this.gitPlugin.updateGitExecutable(pending.value);
@@ -753,7 +756,7 @@ export class GitSettingsTab extends PluginSettingTab {
       return;
     }
     this.pendingExecutableUpdate = null;
-    clearTimeout(pending.timer);
+    window.clearTimeout(pending.timer);
     for (const waiter of pending.resolvers) {
       waiter.resolve();
     }
@@ -777,9 +780,11 @@ export class GitSettingsTab extends PluginSettingTab {
       }
     }
 
-    if (typeof setting.setErrorMessage === JAVASCRIPT_TYPE_NAMES.function) {
-      setting.setErrorMessage(errorMessage ?? null);
-      return existingErrorEl;
+    if (requireApiVersion(OBSIDIAN_API_VERSIONS.settingErrorMessage)) {
+      if (typeof setting.setErrorMessage === JAVASCRIPT_TYPE_NAMES.function) {
+        setting.setErrorMessage(errorMessage ?? null);
+        return existingErrorEl;
+      }
     }
 
     if (!hasError) {

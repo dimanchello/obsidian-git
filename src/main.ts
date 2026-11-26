@@ -41,7 +41,7 @@ import {
   GIT_ACTION_ORDER,
   GIT_EXECUTABLE_RESOLUTION_STATE,
   GitAction,
-  OBSIDIAN_WORKSPACE_FILES,
+  OBSIDIAN_WORKSPACE_FILE_NAMES,
   PLUGIN_DOM_NAMES,
   PLUGIN_FORMAT,
   STATUS_BAR_ICONS,
@@ -83,6 +83,7 @@ const VAULT_EVENTS = {
 const JS_TYPES = {
   object: 'object',
   function: 'function',
+  string: 'string',
 } as const;
 
 const MENU_POSITION_FALLBACK = {
@@ -1084,6 +1085,25 @@ export default class GitCommandsPlugin extends Plugin {
     };
   }
 
+  private getWorkspaceFilePaths(): readonly string[] {
+    const rawConfigDir = this.app?.vault?.configDir;
+    if (typeof rawConfigDir !== JS_TYPES.string) {
+      return [];
+    }
+
+    const normalizedConfigDir = rawConfigDir
+      .trim()
+      .replaceAll(PLUGIN_FORMAT.windowsPathSeparator, PLUGIN_FORMAT.posixPathSeparator)
+      .replace(PLUGIN_FORMAT.edgeSlashesPattern, PLUGIN_FORMAT.emptyString);
+    if (normalizedConfigDir.length === PLUGIN_FORMAT.emptyString.length) {
+      return [];
+    }
+
+    return OBSIDIAN_WORKSPACE_FILE_NAMES.map(
+      (fileName) => normalizedConfigDir + PLUGIN_FORMAT.posixPathSeparator + fileName,
+    );
+  }
+
   private async warnIfWorkspaceFilesTracked(): Promise<void> {
     if (
       this.unloaded ||
@@ -1094,8 +1114,13 @@ export default class GitCommandsPlugin extends Plugin {
       return;
     }
 
+    const workspaceFiles = this.getWorkspaceFilePaths();
+    if (workspaceFiles.length === STATUS_COUNT_DEFAULTS.none) {
+      return;
+    }
+
     try {
-      const tracked = await this.createService().listTrackedFiles(OBSIDIAN_WORKSPACE_FILES);
+      const tracked = await this.createService().listTrackedFiles(workspaceFiles);
       if (this.unloaded) {
         return;
       }

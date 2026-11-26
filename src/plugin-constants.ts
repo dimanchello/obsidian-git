@@ -66,9 +66,9 @@ export const SETTINGS_DEBOUNCE_MS = 400;
 
 export const DEFAULT_HISTORY_LIMIT = 20;
 
-export const OBSIDIAN_WORKSPACE_FILES = [
-  '.obsidian/workspace.json',
-  '.obsidian/workspace-mobile.json',
+export const OBSIDIAN_WORKSPACE_FILE_NAMES = [
+  'workspace.json',
+  'workspace-mobile.json',
 ] as const;
 
 export const STATUS_BAR_KEYBOARD_KEYS = {
@@ -111,6 +111,9 @@ export const STATUS_BAR_ICONS = {
 
 export const PLUGIN_FORMAT = {
   emptyString: '',
+  posixPathSeparator: '/',
+  windowsPathSeparator: '\\',
+  edgeSlashesPattern: /^\/+|\/+$/g,
   datetimeToken: '{datetime}',
   datetimePadWidth: 2,
   datetimePadCharacter: '0',

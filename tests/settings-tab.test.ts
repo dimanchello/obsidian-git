@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { MockElement, MockSetting, MockPluginSettingTab, mockState } = vi.hoisted(() => {
   const MOCK_DOM_VALUES = {
@@ -154,6 +154,7 @@ const { MockElement, MockSetting, MockPluginSettingTab, mockState } = vi.hoisted
   const state = {
     settings: [] as HoistedMockSetting[],
     useNativeSetErrorMessage: false,
+    supportedApiVersions: new Set<string>(),
   };
 
   class HoistedMockSetting {
@@ -243,6 +244,7 @@ const { MockElement, MockSetting, MockPluginSettingTab, mockState } = vi.hoisted
 vi.mock('obsidian', () => ({
   PluginSettingTab: MockPluginSettingTab,
   Setting: MockSetting,
+  requireApiVersion: (version: string): boolean => mockState.supportedApiVersions.has(version),
 }));
 
 import type {
@@ -287,6 +289,7 @@ function createMockPlugin(): GitCommandsPlugin {
 function resetMockSettings(): void {
   mockState.settings.length = SETTINGS_TAB_TEST_CONSTANTS.noCallsCount;
   mockState.useNativeSetErrorMessage = false;
+  mockState.supportedApiVersions.clear();
 }
 
 function findControlByType<T extends SettingControl['type']>(
@@ -323,7 +326,15 @@ function findSettingRowByName(name: string) {
   return row;
 }
 
+beforeEach(() => {
+  vi.stubGlobal(SETTINGS_TAB_TEST_CONSTANTS.windowGlobalName, {
+    setTimeout: (...args: Parameters<typeof setTimeout>) => globalThis.setTimeout(...args),
+    clearTimeout: (...args: Parameters<typeof clearTimeout>) => globalThis.clearTimeout(...args),
+  });
+});
+
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.useRealTimers();
   resetMockSettings();
 });
@@ -888,8 +899,9 @@ describe('GitSettingsTab legacy display() fallback', () => {
     );
   });
 
-  it('uses Setting.setErrorMessage when available in display()', () => {
+  it('uses Setting.setErrorMessage when requireApiVersion("1.13.0") succeeds in display()', () => {
     mockState.useNativeSetErrorMessage = true;
+    mockState.supportedApiVersions.add(SETTINGS_TAB_TEST_CONSTANTS.apiVersionErrorMessage);
     const plugin = createMockPlugin();
     const tab = new GitSettingsTab(plugin, {
       executableDebounceMs: SETTINGS_TAB_TEST_CONSTANTS.immediateDebounceMs,
@@ -904,5 +916,23 @@ describe('GitSettingsTab legacy display() fallback', () => {
       ENGLISH_MESSAGES.settings.invalidNonNegativeInteger,
       null,
     ]);
+    expect(fetchRow.infoEl.children).toHaveLength(SETTINGS_TAB_TEST_CONSTANTS.noCallsCount);
+  });
+
+  it('falls back to custom error element when requireApiVersion("1.13.0") returns false', () => {
+    mockState.useNativeSetErrorMessage = true;
+    const plugin = createMockPlugin();
+    const tab = new GitSettingsTab(plugin, {
+      executableDebounceMs: SETTINGS_TAB_TEST_CONSTANTS.immediateDebounceMs,
+    });
+
+    tab.display();
+    const fetchRow = findSettingRowByName(ENGLISH_MESSAGES.settings.fetchIntervalName);
+    fetchRow.textComponent?.triggerChange(SETTINGS_TAB_TEST_CONSTANTS.invalidNegativeInput);
+
+    expect(fetchRow.errorMessagesReceived).toHaveLength(SETTINGS_TAB_TEST_CONSTANTS.noCallsCount);
+    const fetchErrorEl = fetchRow.infoEl.children[SETTINGS_TAB_TEST_CONSTANTS.firstIndex];
+    expect(fetchErrorEl?.textContent).toBe(ENGLISH_MESSAGES.settings.invalidNonNegativeInteger);
+    expect(fetchErrorEl?.hidden).toBe(false);
   });
 });
