@@ -480,7 +480,6 @@ vi.mock('obsidian', () => {
     Notice: MockNotice,
     setIcon: mockSetIcon,
     getLanguage: vi.fn(() => PLUGIN_TEST_VALUES.englishLanguage),
-    requireApiVersion: vi.fn(() => false),
     FileSystemAdapter: MockFileSystemAdapter,
     MarkdownView: MockMarkdownView,
     TextFileView: class {},

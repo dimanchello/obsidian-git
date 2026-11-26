@@ -1,6 +1,5 @@
 import {
   PluginSettingTab,
-  requireApiVersion,
   Setting,
   type ButtonComponent,
   type DropdownComponent,
@@ -22,10 +21,6 @@ import {
   StatusBarClickAction,
   type GitPluginSettings,
 } from './settings';
-
-const OBSIDIAN_API_VERSIONS = {
-  settingErrorMessage: '1.13.0',
-} as const;
 
 const SETTING_CONTROL_TYPES = {
   text: 'text',
@@ -777,13 +772,6 @@ export class GitSettingsTab extends PluginSettingTab {
         inputEl.setAttribute(SETTINGS_TAB_DOM.ariaInvalidAttribute, SETTINGS_TAB_DOM.ariaTrue);
       } else {
         inputEl.removeAttribute(SETTINGS_TAB_DOM.ariaInvalidAttribute);
-      }
-    }
-
-    if (requireApiVersion(OBSIDIAN_API_VERSIONS.settingErrorMessage)) {
-      if (typeof setting.setErrorMessage === JAVASCRIPT_TYPE_NAMES.function) {
-        setting.setErrorMessage(errorMessage ?? null);
-        return existingErrorEl;
       }
     }
 
