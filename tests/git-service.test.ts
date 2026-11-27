@@ -33,6 +33,8 @@ const GIT_SERVICE_TEST_VALUES = {
   gitDirName: '.git',
   mergeHeadName: 'MERGE_HEAD',
   mergeHeadContent: 'abc123\n',
+  rebaseHeadName: 'REBASE_HEAD',
+  rebaseHeadContent: 'def456\n',
   vaultPrefix: 'vault/\n',
   sampleGitMarkerStdout: '.git/MERGE_HEAD\n',
   newline: '\n',
@@ -325,6 +327,38 @@ describe('GitService', () => {
       GitConflictInProgressError,
     );
     expect(runner.requests).toHaveLength(GIT_SERVICE_TEST_VALUES.oneCount);
+  });
+
+  it('allows commitAll when only a leftover REBASE_HEAD file exists on disk', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), GIT_SERVICE_TEST_VALUES.tempDirPrefix));
+    const gitDir = join(tempDir, GIT_SERVICE_TEST_VALUES.gitDirName);
+    await mkdir(gitDir);
+    await writeFile(
+      join(gitDir, GIT_SERVICE_TEST_VALUES.rebaseHeadName),
+      GIT_SERVICE_TEST_VALUES.rebaseHeadContent,
+    );
+
+    const runner = new QueueRunner([
+      ...createNoMarkerResults(),
+      {
+        ...GIT_CLI_PROCESS_RESULTS.success,
+        stdout: GIT_SERVICE_TEST_VALUES.statusWithModifiedOutput,
+      },
+      GIT_CLI_PROCESS_RESULTS.success,
+      GIT_CLI_PROCESS_RESULTS.diffHasChanges,
+      GIT_CLI_PROCESS_RESULTS.commitSuccess,
+    ]);
+    const service = new GitService(
+      new GitCli(runner, {
+        executable: GIT_TEST_ENVIRONMENT.executable,
+        cwd: tempDir,
+      }),
+    );
+
+    expect(GIT_CONFLICT_MARKER_FILES).not.toContain(GIT_SERVICE_TEST_VALUES.rebaseHeadName);
+    const outcome = await service.commitAll(GIT_CLI_TEST_VALUES.unsafeCommitMessage);
+
+    expect(outcome.kind).toBe(CommitOutcomeKind.Committed);
   });
 
   it('surfaces Git stderr as the useful failure message', async () => {

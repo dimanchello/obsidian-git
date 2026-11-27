@@ -36,31 +36,7 @@ describe('GitCli & GitService integration', () => {
   });
 
   it('runs real Git operations against a local remote without network access', async () => {
-    const bare = join(directory, GIT_INTEGRATION_TEST_VALUES.remoteDirectoryName);
-    const primary = join(directory, GIT_INTEGRATION_TEST_VALUES.primaryDirectoryName);
-    const secondary = join(directory, GIT_INTEGRATION_TEST_VALUES.secondaryDirectoryName);
-    await mkdir(primary);
-    await git(directory, GIT_INTEGRATION_TEST_COMMANDS.initBare(bare));
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.initPrimary);
-    await configureIdentity(primary);
-
-    await writeFile(
-      join(primary, GIT_INTEGRATION_TEST_VALUES.localFileName),
-      GIT_INTEGRATION_TEST_VALUES.initialFileContent,
-    );
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.addAll);
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.commitInitial);
-    const bareRemoteUrl = pathToFileURL(bare).href;
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.addRemote(bareRemoteUrl));
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.pushUpstream);
-    await git(directory, GIT_INTEGRATION_TEST_COMMANDS.clone(bareRemoteUrl, secondary));
-    await configureIdentity(secondary);
-
-    const gitCli = new GitCli(new NodeProcessRunner(), {
-      executable: GIT_TEST_ENVIRONMENT.executable,
-      cwd: primary,
-    });
-    const service = new GitService(gitCli);
+    const { primary, secondary, service } = await createRemoteRepositoryPair(directory);
 
     const cleanStatus = await service.status();
     expect(cleanStatus.status.branch).toBe(GIT_INTEGRATION_TEST_VALUES.initialBranch);
@@ -129,31 +105,7 @@ describe('GitCli & GitService integration', () => {
   });
 
   it('supports rebase and ff-only pull strategies against a local remote', async () => {
-    const bare = join(directory, GIT_INTEGRATION_TEST_VALUES.remoteDirectoryName);
-    const primary = join(directory, GIT_INTEGRATION_TEST_VALUES.primaryDirectoryName);
-    const secondary = join(directory, GIT_INTEGRATION_TEST_VALUES.secondaryDirectoryName);
-    await mkdir(primary);
-    await git(directory, GIT_INTEGRATION_TEST_COMMANDS.initBare(bare));
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.initPrimary);
-    await configureIdentity(primary);
-    await writeFile(
-      join(primary, GIT_INTEGRATION_TEST_VALUES.localFileName),
-      GIT_INTEGRATION_TEST_VALUES.initialFileContent,
-    );
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.addAll);
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.commitInitial);
-    const bareRemoteUrl = pathToFileURL(bare).href;
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.addRemote(bareRemoteUrl));
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.pushUpstream);
-    await git(directory, GIT_INTEGRATION_TEST_COMMANDS.clone(bareRemoteUrl, secondary));
-    await configureIdentity(secondary);
-
-    const service = new GitService(
-      new GitCli(new NodeProcessRunner(), {
-        executable: GIT_TEST_ENVIRONMENT.executable,
-        cwd: primary,
-      }),
-    );
+    const { primary, secondary, service } = await createRemoteRepositoryPair(directory);
 
     await writeFile(
       join(secondary, GIT_INTEGRATION_TEST_VALUES.remoteFileName),
@@ -199,35 +151,12 @@ describe('GitCli & GitService integration', () => {
   });
 
   it('detects detached HEAD, renames, conflicts, and blocks commitAll during a merge conflict', async () => {
-    const bare = join(directory, GIT_INTEGRATION_TEST_VALUES.remoteDirectoryName);
-    const primary = join(directory, GIT_INTEGRATION_TEST_VALUES.primaryDirectoryName);
-    const secondary = join(directory, GIT_INTEGRATION_TEST_VALUES.secondaryDirectoryName);
-    await mkdir(primary);
-    await git(directory, GIT_INTEGRATION_TEST_COMMANDS.initBare(bare));
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.initPrimary);
-    await configureIdentity(primary);
-    await writeFile(
-      join(primary, GIT_INTEGRATION_TEST_VALUES.localFileName),
-      GIT_INTEGRATION_TEST_VALUES.initialFileContent,
-    );
-    await writeFile(
-      join(primary, GIT_INTEGRATION_TEST_VALUES.renamedOldFileName),
-      GIT_INTEGRATION_TEST_VALUES.initialFileContent,
-    );
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.addAll);
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.commitInitial);
-    const bareRemoteUrl = pathToFileURL(bare).href;
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.addRemote(bareRemoteUrl));
-    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.pushUpstream);
-    await git(directory, GIT_INTEGRATION_TEST_COMMANDS.clone(bareRemoteUrl, secondary));
-    await configureIdentity(secondary);
-
-    const service = new GitService(
-      new GitCli(new NodeProcessRunner(), {
-        executable: GIT_TEST_ENVIRONMENT.executable,
-        cwd: primary,
-      }),
-    );
+    const { primary, secondary, service } = await createRemoteRepositoryPair(directory, [
+      {
+        name: GIT_INTEGRATION_TEST_VALUES.renamedOldFileName,
+        content: GIT_INTEGRATION_TEST_VALUES.initialFileContent,
+      },
+    ]);
 
     await git(primary, GIT_INTEGRATION_TEST_COMMANDS.checkoutDetachHead);
     expect((await service.status()).status.branch).toBeNull();
@@ -290,6 +219,57 @@ describe('GitCli & GitService integration', () => {
     await expect(
       service.commitAll(GIT_INTEGRATION_TEST_VALUES.localCommitMessage),
     ).rejects.toBeInstanceOf(GitConflictInProgressError);
+  });
+
+  it('blocks commitAll during a rebase conflict and allows commitAll after rebase --continue', async () => {
+    const { primary, secondary, service } = await createRemoteRepositoryPair(directory);
+
+    await writeFile(
+      join(primary, GIT_INTEGRATION_TEST_VALUES.localFileName),
+      GIT_INTEGRATION_TEST_VALUES.conflictLinePrimary,
+    );
+    await service.commitAll(GIT_INTEGRATION_TEST_VALUES.localCommitMessage);
+
+    await writeFile(
+      join(secondary, GIT_INTEGRATION_TEST_VALUES.localFileName),
+      GIT_INTEGRATION_TEST_VALUES.conflictLineSecondary,
+    );
+    await git(secondary, GIT_INTEGRATION_TEST_COMMANDS.addAll);
+    await git(
+      secondary,
+      GIT_INTEGRATION_TEST_COMMANDS.commitWithMessage(
+        GIT_INTEGRATION_TEST_VALUES.conflictCommitSecondaryMessage,
+      ),
+    );
+    await git(secondary, GIT_INTEGRATION_TEST_COMMANDS.push);
+
+    await expect(service.pull(PullStrategy.Rebase)).rejects.toBeInstanceOf(GitCommandError);
+    expect(await service.hasMergeOrRebaseInProgress()).toBe(true);
+    await expect(
+      service.commitAll(GIT_INTEGRATION_TEST_VALUES.localCommitMessage),
+    ).rejects.toBeInstanceOf(GitConflictInProgressError);
+
+    await writeFile(
+      join(primary, GIT_INTEGRATION_TEST_VALUES.localFileName),
+      GIT_INTEGRATION_TEST_VALUES.resolvedConflictContent,
+    );
+    await service.stageFiles([GIT_INTEGRATION_TEST_VALUES.localFileName]);
+    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.commitNoEdit);
+    await git(primary, GIT_INTEGRATION_TEST_COMMANDS.rebaseContinue);
+
+    expect(await service.hasMergeOrRebaseInProgress()).toBe(false);
+
+    await writeFile(
+      join(primary, GIT_INTEGRATION_TEST_VALUES.localFileName),
+      GIT_INTEGRATION_TEST_VALUES.localFileContent,
+    );
+    const outcome = await service.commitAll(
+      GIT_INTEGRATION_TEST_VALUES.rebasePostResolveCommitMessage,
+    );
+    expect(outcome.kind).toBe(CommitOutcomeKind.Committed);
+    await expect(service.push()).resolves.toMatchObject({
+      result: { exitCode: GIT_INTEGRATION_TEST_VALUES.expectedSuccessExitCode },
+    });
   });
 
   it('supports init, unborn log/unstage, selective staging, discardFiles, listTrackedFiles, and vault prefixing', async () => {
@@ -363,6 +343,42 @@ describe('GitCli & GitService integration', () => {
     expect(outsideFile?.path).toBe(GIT_INTEGRATION_TEST_VALUES.outsideFileName);
   });
 });
+
+async function createRemoteRepositoryPair(
+  directory: string,
+  extraInitialFiles: readonly { readonly name: string; readonly content: string }[] = [],
+): Promise<{ readonly primary: string; readonly secondary: string; readonly service: GitService }> {
+  const bare = join(directory, GIT_INTEGRATION_TEST_VALUES.remoteDirectoryName);
+  const primary = join(directory, GIT_INTEGRATION_TEST_VALUES.primaryDirectoryName);
+  const secondary = join(directory, GIT_INTEGRATION_TEST_VALUES.secondaryDirectoryName);
+  await mkdir(primary);
+  await git(directory, GIT_INTEGRATION_TEST_COMMANDS.initBare(bare));
+  await git(primary, GIT_INTEGRATION_TEST_COMMANDS.initPrimary);
+  await configureIdentity(primary);
+  await writeFile(
+    join(primary, GIT_INTEGRATION_TEST_VALUES.localFileName),
+    GIT_INTEGRATION_TEST_VALUES.initialFileContent,
+  );
+  for (const file of extraInitialFiles) {
+    await writeFile(join(primary, file.name), file.content);
+  }
+  await git(primary, GIT_INTEGRATION_TEST_COMMANDS.addAll);
+  await git(primary, GIT_INTEGRATION_TEST_COMMANDS.commitInitial);
+  const bareRemoteUrl = pathToFileURL(bare).href;
+  await git(primary, GIT_INTEGRATION_TEST_COMMANDS.addRemote(bareRemoteUrl));
+  await git(primary, GIT_INTEGRATION_TEST_COMMANDS.pushUpstream);
+  await git(directory, GIT_INTEGRATION_TEST_COMMANDS.clone(bareRemoteUrl, secondary));
+  await configureIdentity(secondary);
+
+  const service = new GitService(
+    new GitCli(new NodeProcessRunner(), {
+      executable: GIT_TEST_ENVIRONMENT.executable,
+      cwd: primary,
+    }),
+  );
+
+  return { primary, secondary, service };
+}
 
 async function git(cwd: string, args: readonly string[]): Promise<void> {
   await execFileAsync(GIT_TEST_ENVIRONMENT.executable, [...args], { cwd });

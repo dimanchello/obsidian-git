@@ -107,9 +107,10 @@ export const GIT_EXIT_CODES = {
   diffHasChanges: 1,
 } as const;
 
+// REBASE_HEAD is intentionally excluded: Git leaves it behind after `rebase --continue`,
+// `--skip`, and `--quit`, whereas active rebases always keep `rebase-merge` or `rebase-apply`.
 export const GIT_CONFLICT_MARKER_FILES = [
   'MERGE_HEAD',
-  'REBASE_HEAD',
   'CHERRY_PICK_HEAD',
   'rebase-merge',
   'rebase-apply',
